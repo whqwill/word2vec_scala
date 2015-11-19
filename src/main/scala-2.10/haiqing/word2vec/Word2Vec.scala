@@ -11,12 +11,261 @@ import org.apache.spark.mllib.linalg.{Vector, Vectors, DenseMatrix, BLAS, DenseV
  * Created by hwang on 17.11.15.
  */
 
-private case class VocabWord(
+case class VocabWord(
   var word: String,
   var cn: Int
 )
 
-class Word2Vec extends Serializable {
+class MSSkipGram extends Serializable{
+  private var vectorSize = 100
+  private var learningRate = 0.025
+  private var numPartitions = 1
+  private var numIterations = 1
+  private var seed = util.Random.nextLong()
+  private var minCount = 5
+  private var negative = 5
+  private var numSenses = 3
+
+  def setNumSenses(numSenses: Int): this.type = {
+    this.numSenses = numSenses
+    this
+  }
+  def setVectorSize(vectorSize: Int): this.type = {
+    this.vectorSize = vectorSize
+    this
+  }
+  def setLearningRate(learningRate: Double): this.type = {
+    this.learningRate = learningRate
+    this
+  }
+  def setNumPartitions(numPartitions: Int): this.type = {
+    require(numPartitions > 0, s"numPartitions must be greater than 0 but got $numPartitions")
+    this.numPartitions = numPartitions
+    this
+  }
+  def setNumIterations(numIterations: Int): this.type = {
+    this.numIterations = numIterations
+    this
+  }
+  def setSeed(seed: Long): this.type = {
+    this.seed = seed
+    this
+  }
+  private val EXP_TABLE_SIZE = 1000
+  private val MAX_EXP = 6
+  private val MAX_SENTENCE_LENGTH = 1000
+  private val POWER = 0.75
+  private val VARIANCE = 0f
+  private val TABEL_SIZE = 10000
+  private val window = 5
+  private var trainWordsCount = 0
+  private var vocabSize = 0
+  private var vocab: Array[VocabWord] = null
+  private var vocabHash = mutable.HashMap.empty[String, Int]
+  private var syn0Global:Array[Float] = null
+  private var syn1Global:Array[Float] = null
+
+  def initFromSkipGram(skipgram: SkipGram): Unit = {
+    vocab = skipgram.getVocab()
+    vocabHash = skipgram.getVocabHash()
+    vocabSize = skipgram.getVocabSize()
+    syn0Global = new Array[Float](vocabSize * vectorSize * numSenses)
+    syn1Global = new Array[Float](vocabSize * vectorSize * numSenses)
+    val syn0 = skipgram.getSyn0()
+    val syn1 = skipgram.getSyn1()
+    for (a <- 0 to syn0.size-1)
+      for (i <- 0 to numSenses-1) { //it is a problem
+        syn0Global(i*syn0.size+a) = syn0(a)+(util.Random.nextFloat()-0.5f)*VARIANCE
+        syn1Global(i*syn0.size+a) = syn1(a)+(util.Random.nextFloat()-0.5f)*VARIANCE
+      }
+  }
+
+  private def createExpTable(): Array[Float] = {
+    val expTable = new Array[Float](EXP_TABLE_SIZE)
+    var i = 0
+    while (i < EXP_TABLE_SIZE) {
+      val tmp = math.exp((2.0 * i / EXP_TABLE_SIZE - 1.0) * MAX_EXP)
+      expTable(i) = (tmp / (tmp + 1.0)).toFloat
+      i += 1
+    }
+    expTable
+  }
+  private def makeTable(): Array[Int] = {
+    val table = new Array[Int](TABEL_SIZE)
+    var trainWordsPow = 0.0;
+    for (a <- 0 to vocabSize-1)
+      trainWordsPow += Math.pow(vocab(a).cn, POWER)
+    var i = 0
+    var d1 = Math.pow(vocab(i).cn,POWER) / trainWordsPow
+    for (a <- 0 to TABEL_SIZE-1) {
+      table(a) = i
+      if (a*1.0/TABEL_SIZE > d1) {
+        i += 1
+        d1 += Math.pow(vocab(i).cn, POWER) / trainWordsPow
+      }
+      if (i >= vocabSize)
+        i = vocabSize-1
+    }
+    table
+  }
+
+  def fit[S <: Iterable[String]](dataset: RDD[S]): Word2VecModel = {
+    val words = dataset.flatMap(x => x)
+    val sc = dataset.context
+    val expTable = sc.broadcast(createExpTable())
+    val bcVocabHash = sc.broadcast(vocabHash)
+    val table = sc.broadcast(makeTable())
+
+    //sentence need to be changed
+    /*val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      new Iterator[Array[Int]] {
+        def hasNext: Boolean = iter.hasNext
+        def next(): Array[Int] = {
+          val sentence = ArrayBuilder.make[Int]
+          var sentenceLength = 0
+          while (iter.hasNext && sentenceLength < MAX_SENTENCE_LENGTH) {
+            val word = bcVocabHash.value.get(iter.next())
+            word match {
+              case Some(w) =>
+                sentence += w
+                sentenceLength += 1
+              case None =>
+            }
+          }
+          sentence.result()
+        }
+      }
+    }
+    val newSentences = sentences.repartition(numPartitions).cache()
+    util.Random.setSeed(seed)
+    if (vocabSize.toLong * vectorSize * 8 >= Int.MaxValue) {
+      throw new RuntimeException("Please increase minCount or decrease vectorSize in Word2Vec" +
+        " to avoid an OOM. You are highly recommended to make your vocabSize*vectorSize, " +
+        "which is " + vocabSize + "*" + vectorSize + " for now, less than `Int.MaxValue/8`.")
+    }
+
+    var alpha = learningRate
+    for (k <- 1 to numIterations) {
+      println("Iteration "+k)
+      val partial = newSentences.mapPartitionsWithIndex { case (idx, iter) =>
+        util.Random.setSeed(seed ^ ((idx + 1) << 16) ^ ((-k - 1) << 8))
+        val syn0Modify = new Array[Int](vocabSize)
+        val syn1Modify = new Array[Int](vocabSize)
+        val model = iter.foldLeft((syn0Global, syn1Global, 0, 0)) {
+          case ((syn0, syn1, lastWordCount, wordCount), sentence) =>
+            var lwc = lastWordCount
+            var wc = wordCount
+            if (wordCount - lastWordCount > 10000) {
+              lwc = wordCount
+              // TODO: discount by iteration?
+              alpha =
+                learningRate * (1 - (trainWordsCount*(k-1) + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
+              //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
+              if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
+              println("wordCount = " + wordCount + ", alpha = " + alpha)
+            }
+            wc += sentence.size
+            var pos = 0
+            while (pos < sentence.size) {
+              val word = sentence(pos)
+              val b = util.Random.nextInt(window)
+              // Train Skip-gram
+              var a = b
+              while (a < window * 2 + 1 - b) {
+                if (a != window) {
+                  val c = pos - window + a
+                  if (c >= 0 && c < sentence.size) {
+                    val lastWord = sentence(c)
+                    val l1 = lastWord * vectorSize
+                    val neu1e = new Array[Float](vectorSize)
+                    var target = word
+                    var label = 1
+                    for (d <- 0 to negative+1) {
+                      if (d > 0) {
+                        val idx = Math.abs(util.Random.nextLong()%TABEL_SIZE).toInt
+                        target = table.value(idx)
+                        if (target <= 0)
+                          target = (Math.abs(util.Random.nextLong())%(vocabSize-1)+1).toInt
+                        label = 0
+                      }
+                      if (target != lastWord || d == 0) {
+                        val l2 = target * vectorSize
+                        // Propagate hidden -> output
+                        var f = blas.sdot(vectorSize, syn0, l1, 1, syn1, l2, 1)
+                        var g = 0.0f
+                        if (f > MAX_EXP)
+                          g = (label - 1) * alpha.toFloat
+                        else if (f < -MAX_EXP)
+                          g = (label - 0) * alpha.toFloat
+                        else {
+                          val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
+                          f = expTable.value(ind)
+                          g = (label - f) * alpha.toFloat
+                        }
+                        blas.saxpy(vectorSize, g, syn1, l2, 1, neu1e, 0, 1)
+                        blas.saxpy(vectorSize, g, syn0, l1, 1, syn1, l2, 1)
+                        syn1Modify(target) += 1
+                      }
+                    }
+                    blas.saxpy(vectorSize, 1.0f, neu1e, 0, 1, syn0, l1, 1)
+                    syn0Modify(lastWord) += 1
+                  }
+                }
+                a += 1
+              }
+              pos += 1
+            }
+            (syn0, syn1, lwc, wc)
+        }
+        val syn0Local = model._1
+        val syn1Local = model._2
+        // Only output modified vectors.
+        Iterator.tabulate(vocabSize) { index =>
+          if (syn0Modify(index) >= 0) {
+            Some((index, syn0Local.slice(index * vectorSize, (index + 1) * vectorSize)))
+          } else {
+            None
+          }
+        }.flatten ++ Iterator.tabulate(vocabSize) { index =>
+          if (syn1Modify(index) >= 0) {
+            Some((index + vocabSize, syn1Local.slice(index * vectorSize, (index + 1) * vectorSize)))
+          } else {
+            None
+          }
+        }.flatten
+      }
+      val synAgg = partial.reduceByKey { case (v1, v2) =>
+        blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
+        v1
+      }.collect()
+      var i = 0
+      while (i < synAgg.length) {
+        val index = synAgg(i)._1
+        if (index < vocabSize) {
+          Array.copy(synAgg(i)._2, 0, syn0Global, index * vectorSize, vectorSize)
+        } else {
+          Array.copy(synAgg(i)._2, 0, syn1Global, (index - vocabSize) * vectorSize, vectorSize)
+        }
+        i += 1
+      }
+      for (a <- 0 to syn0Global.size-1) {
+        syn0Global(a) /= numPartitions
+        syn1Global(a) /= numPartitions
+      }
+    }
+    newSentences.unpersist()*/
+
+    val wordArray = vocab.map(_.word)
+    val msWordArray = new Array[String](wordArray.size*numSenses)
+    for (a <- 0 to wordArray.size-1)
+      for (i <- 0 to numSenses-1)
+        msWordArray(i*numSenses+a) = wordArray(a)+i
+    new Word2VecModel(msWordArray.zipWithIndex.toMap, syn0Global)
+
+  }
+}
+
+class SkipGram extends Serializable {
   private var vectorSize = 100
   private var learningRate = 0.025
   private var numPartitions = 1
@@ -65,6 +314,14 @@ class Word2Vec extends Serializable {
   private var vocabSize = 0
   private var vocab: Array[VocabWord] = null
   private var vocabHash = mutable.HashMap.empty[String, Int]
+  private var syn0Global:Array[Float] = null
+  private var syn1Global:Array[Float] = null
+
+  def getVocabSize() = vocabSize
+  def getVocab() = vocab
+  def getVocabHash() = vocabHash
+  def getSyn0() = syn0Global
+  def getSyn1() = syn1Global
 
   private def learnVocab(words: RDD[String]): Unit = {
     vocab = words.map(w => (w, 1))
@@ -128,7 +385,6 @@ class Word2Vec extends Serializable {
     val sc = dataset.context
 
     val expTable = sc.broadcast(createExpTable())
-    val bcVocab = sc.broadcast(vocab)
     val bcVocabHash = sc.broadcast(vocabHash)
     val table = sc.broadcast(makeTable())
 
@@ -162,11 +418,12 @@ class Word2Vec extends Serializable {
         "which is " + vocabSize + "*" + vectorSize + " for now, less than `Int.MaxValue/8`.")
     }
 
-    val syn0Global =
-      Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
-    val syn1Global = new Array[Float](vocabSize * vectorSize)
     var alpha = learningRate
+    syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
+    syn1Global = new Array[Float](vocabSize * vectorSize)
+
     for (k <- 1 to numIterations) {
+      println("Iteration "+k)
       val partial = newSentences.mapPartitionsWithIndex { case (idx, iter) =>
         util.Random.setSeed(seed ^ ((idx + 1) << 16) ^ ((-k - 1) << 8))
         val syn0Modify = new Array[Int](vocabSize)
@@ -179,7 +436,8 @@ class Word2Vec extends Serializable {
               lwc = wordCount
               // TODO: discount by iteration?
               alpha =
-                learningRate * (1 - numPartitions * wordCount.toDouble / (trainWordsCount + 1))
+                learningRate * (1 - (trainWordsCount*(k-1) + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
+              //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
               if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
               println("wordCount = " + wordCount + ", alpha = " + alpha)
             }
@@ -197,7 +455,7 @@ class Word2Vec extends Serializable {
                     val lastWord = sentence(c)
                     val l1 = lastWord * vectorSize
                     val neu1e = new Array[Float](vectorSize)
-                    var target = lastWord
+                    var target = word
                     var label = 1
                     for (d <- 0 to negative+1) {
                       if (d > 0) {
@@ -240,13 +498,13 @@ class Word2Vec extends Serializable {
         val syn1Local = model._2
         // Only output modified vectors.
         Iterator.tabulate(vocabSize) { index =>
-          if (syn0Modify(index) > 0) {
+          if (syn0Modify(index) >= 0) {
             Some((index, syn0Local.slice(index * vectorSize, (index + 1) * vectorSize)))
           } else {
             None
           }
         }.flatten ++ Iterator.tabulate(vocabSize) { index =>
-          if (syn1Modify(index) > 0) {
+          if (syn1Modify(index) >= 0) {
             Some((index + vocabSize, syn1Local.slice(index * vectorSize, (index + 1) * vectorSize)))
           } else {
             None
@@ -267,6 +525,10 @@ class Word2Vec extends Serializable {
         }
         i += 1
       }
+      for (a <- 0 to syn0Global.size-1) {
+        syn0Global(a) /= numPartitions
+        syn1Global(a) /= numPartitions
+      }
     }
     newSentences.unpersist()
 
@@ -274,6 +536,8 @@ class Word2Vec extends Serializable {
     new Word2VecModel(wordArray.zipWithIndex.toMap, syn0Global)
   }
 }
+
+
 class Word2VecModel (
     private val wordIndex: Map[String, Int],
     private val wordVectors: Array[Float]){
