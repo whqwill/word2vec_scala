@@ -428,6 +428,9 @@ class SkipGram extends Serializable {
 
     learnVocab(words)
 
+    println("vocabSize: "+vocabSize)
+
+
     val sc = dataset.context
 
     val expTable = sc.broadcast(createExpTable())

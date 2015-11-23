@@ -19,11 +19,12 @@ object Main {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    //val input = sc.textFile("raw_sentences.txt").map(line => line.split(" ").toSeq)
+    //val input = sc.textFile("19960820new.txt").map(line => line.split(" ").toSeq)
     val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt)
     //val skipgram = new SkipGram().setNumPartitions(1).setNumIterations(1).setNegative(5)
     val model = skipgram.fit(input)
     val synonyms = model.findSynonyms(args(4), 10)
+    //val synonyms = model.findSynonyms("bank", 10)
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {
@@ -33,12 +34,13 @@ object Main {
     println()
 
 
-    //val msskipgram = new MSSkipGram(skipgram)
+    //val msskipgram = new MSSkipGram(skipgram).setNumPartitions(2).setNumIterations(2).setNegative(5).setNumSenses(2)
     val msskipgram = new MSSkipGram(skipgram).setNumPartitions(args(5).toInt).setNumIterations(args(6).toInt).setNegative(args(7).toInt).setNumSenses(args(8).toInt)
 
     val newModel = msskipgram.fit(input)
 
-    for (i <- 0 to args(8).toInt-1) {
+    for (i <- 0 to 1) {
+      //val newSynonyms = newModel.findSynonyms("bank"+i, 10)
       val newSynonyms = newModel.findSynonyms(args(9)+i, 10)
       //var newSynonyms = newModel.findSynonyms("day0", 10)
 
