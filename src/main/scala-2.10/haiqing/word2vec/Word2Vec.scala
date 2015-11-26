@@ -27,7 +27,12 @@ class MSSkipGram(
   private var minCount = 5
   private var negative = 5
   private var numSenses = 3
-
+  private var adjustingRatio = 0.5
+  private var window = 5
+  def setWindow(window: Int): this.type = {
+    this.window = window
+    this
+  }
   def setNumSenses(numSenses: Int): this.type = {
     this.numSenses = numSenses
     this
@@ -57,13 +62,16 @@ class MSSkipGram(
     this.negative = negative
     this
   }
+  def setMinCount(minCount: Int): this.type = {
+    this.minCount = minCount
+    this
+  }
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
   private val MAX_SENTENCE_LENGTH = 1000
   private val POWER = 0.75
   private val VARIANCE = 0.01f
   private val TABEL_SIZE = 10000
-  private val window = 5
   private val trainWordsCount = skipgram.getTrainWordsCount()
   private val vocabSize = skipgram.getVocabSize()
   private val vocab = skipgram.getVocab()
@@ -148,8 +156,7 @@ class MSSkipGram(
     var alpha = learningRate
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
-      val partial = newSentences.mapPartitionsWithIndex { case (idx, iter) =>
-        util.Random.setSeed(seed ^ ((idx + 1) << 16) ^ ((-k - 1) << 8))
+      val partial = newSentences.mapPartitions { iter =>
         val model = iter.foldLeft((syn0Global, syn1Global, 0, 0)) {
           case ((syn0, syn1, lastWordCount, wordCount), sentence) =>
             var lwc = lastWordCount
@@ -178,7 +185,7 @@ class MSSkipGram(
                 negSample(i) = negSample(i) + util.Random.nextInt(numSenses) * vocabSize
               }
 
-              if (k <= numIterations/2) {
+              if (k <= numIterations*adjustingRatio) {
                 //adjust the senses
                 var bestSense = -1
                 var bestScore = 0.0
@@ -224,9 +231,6 @@ class MSSkipGram(
                     bestSense = sense
                   }
                 }
-
-
-
                 word = word % vocabSize + vocabSize * bestSense
                 sentence(pos) = word
               }
@@ -322,7 +326,11 @@ class SkipGram extends Serializable {
   private var seed = util.Random.nextLong()
   private var minCount = 5
   private var negative = 5
-
+  private var window = 5
+  def setWindow(window: Int): this.type = {
+    this.window = window
+    this
+  }
   def setVectorSize(vectorSize: Int): this.type = {
     this.vectorSize = vectorSize
     this
@@ -358,7 +366,6 @@ class SkipGram extends Serializable {
   private val MAX_SENTENCE_LENGTH = 1000
   private val POWER = 0.75
   private val TABEL_SIZE = 10000
-  private val window = 5
   private var trainWordsCount = 0
   private var vocabSize = 0
   private var vocab: Array[VocabWord] = null
@@ -476,10 +483,10 @@ class SkipGram extends Serializable {
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
+
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
-      val partial = newSentences.mapPartitionsWithIndex { case (idx, iter) =>
-        util.Random.setSeed(seed ^ ((idx + 1) << 16) ^ ((-k - 1) << 8))
+      val partial = newSentences.mapPartitions { iter =>
         val model = iter.foldLeft((syn0Global, syn1Global, 0, 0)) {
           case ((syn0, syn1, lastWordCount, wordCount), sentence) =>
             var lwc = lastWordCount

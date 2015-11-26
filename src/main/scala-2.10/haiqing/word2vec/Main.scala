@@ -19,12 +19,12 @@ object Main {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).filter(Preprocessing.filter1).filter(Preprocessing.filter2).map(Preprocessing.map1)
+    val words = input.flatMap(x => x).map(Preprocessing.map1).filter(Preprocessing.filter1).filter(Preprocessing.filter2).map(Preprocessing.map1)
 
-    val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt)
+    val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt)
 
     val model = skipgram.fit(words)
-    val synonyms = model.findSynonyms(args(4), 10)
+    val synonyms = model.findSynonyms(args(7), 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")
@@ -34,12 +34,12 @@ object Main {
 
     //skipgram.cleanSyn()
 
-    val msskipgram = new MSSkipGram(skipgram).setNumPartitions(args(5).toInt).setNumIterations(args(6).toInt).setNegative(args(7).toInt).setNumSenses(args(8).toInt)
+    val msskipgram = new MSSkipGram(skipgram).setNumPartitions(args(8).toInt).setNumIterations(args(9).toInt).setNegative(args(10).toInt).setNumSenses(args(11).toInt).setMinCount(args(12).toInt).setWindow(args(13).toInt).setVectorSize(args(14).toInt)
 
     val newModel = msskipgram.fit(words)
 
-    for (i <- 0 to args(8).toInt-1) {
-      val newSynonyms = newModel.findSynonyms(args(9)+i, 10)
+    for (i <- 0 to args(11).toInt-1) {
+      val newSynonyms = newModel.findSynonyms(args(15)+i, 10)
 
       println()
       for ((synonym, cosineSimilarity) <- newSynonyms) {
