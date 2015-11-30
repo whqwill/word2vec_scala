@@ -22,13 +22,18 @@ class MSSkipGram(
   private var vectorSize = 100
   private var learningRate = 0.025
   private var numPartitions = 1
-  private var numIterations = 3
+  private var numIterations = 100
   private var seed = util.Random.nextLong()
   private var minCount = 5
   private var negative = 5
   private var numSenses = 3
   private var adjustingRatio = 0.5
   private var window = 5
+  private var sample = 0.01
+  def setSample(sample: Int): this.type = {
+    this.sample = sample
+    this
+  }
   def setWindow(window: Int): this.type = {
     this.window = window
     this
@@ -156,7 +161,7 @@ class MSSkipGram(
     var alpha = learningRate
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
-      val partial = newSentences.mapPartitions { iter =>
+      val partial = newSentences.sample(false, sample, util.Random.nextLong()).mapPartitions { iter =>
         val model = iter.foldLeft((syn0Global, syn1Global, 0, 0)) {
           case ((syn0, syn1, lastWordCount, wordCount), sentence) =>
             var lwc = lastWordCount
@@ -322,11 +327,16 @@ class SkipGram extends Serializable {
   private var vectorSize = 100
   private var learningRate = 0.025
   private var numPartitions = 1
-  private var numIterations = 1
+  private var numIterations = 100
   private var seed = util.Random.nextLong()
   private var minCount = 5
   private var negative = 5
   private var window = 5
+  private var sample = 0.01
+  def setSample(sample: Int): this.type = {
+    this.sample = sample
+    this
+  }
   def setWindow(window: Int): this.type = {
     this.window = window
     this
@@ -479,14 +489,15 @@ class SkipGram extends Serializable {
     }
 
     var alpha = learningRate
-
+    println("Debug vocab size = " )
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
 
+
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
-      val partial = newSentences.mapPartitions { iter =>
+      val partial = newSentences.sample(false, sample, util.Random.nextLong()).mapPartitions { iter =>
         val model = iter.foldLeft((syn0Global, syn1Global, 0, 0)) {
           case ((syn0, syn1, lastWordCount, wordCount), sentence) =>
             var lwc = lastWordCount
