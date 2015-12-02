@@ -12,12 +12,12 @@ import org.apache.spark.mllib.linalg.{Vector, Vectors, DenseMatrix, BLAS, DenseV
  */
 
 case class VocabWord(
-                      var word: String,
-                      var cn: Int
-                      )
+  var word: String,
+  var cn: Int
+)
 
 class MSSkipGram(
-                  private val skipgram: SkipGram) extends Serializable{
+    private val skipgram: SkipGram) extends Serializable{
 
   private var vectorSize = 100
   private var learningRate = 0.025
@@ -287,9 +287,9 @@ class MSSkipGram(
         val syn1Local = model._2
         // Only output modified vectors.
         Iterator.tabulate(vocabSize*numSenses) { index =>
-          Some((index, syn0Local.slice(index * vectorSize, (index + 1) * vectorSize)))
+            Some((index, syn0Local.slice(index * vectorSize, (index + 1) * vectorSize)))
         }.flatten ++ Iterator.tabulate(vocabSize*numSenses) { index =>
-          Some((index + vocabSize*numSenses, syn1Local.slice(index * vectorSize, (index + 1) * vectorSize)))
+            Some((index + vocabSize*numSenses, syn1Local.slice(index * vectorSize, (index + 1) * vectorSize)))
         }.flatten
       }
       val synAgg = partial.reduceByKey { case (v1, v2) =>
@@ -373,7 +373,7 @@ class SkipGram extends Serializable {
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
-  private val MAX_SENTENCE_LENGTH = 1000
+  private val MAX_SENTENCE_LENGTH = 20
   private val POWER = 0.75
   private val TABEL_SIZE = 10000
   private var trainWordsCount = 0
@@ -489,16 +489,18 @@ class SkipGram extends Serializable {
     }
 
     var alpha = learningRate
-    println("Debug vocab size = " )
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
 
+    numIterations = 100
+    sample = 0.01
 
+    println(newSentences.count())
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
-      val bcSyn0Global = sc.broadcast(syn0Global)
-      val bcSyn1Global = sc.broadcast(syn1Global)
+      val syn0 = sc.broadcast(syn0Global)
+      val syn1 = sc.broadcast(syn1Global)
 
       alpha =
         learningRate * (1 - sample*(k-1))
@@ -506,9 +508,8 @@ class SkipGram extends Serializable {
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
       println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
 
-      val partial = newSentences.sample(false, sample, util.Random.nextLong()).mapPartitions { iter =>
-        val model = iter.foldLeft((bcSyn0Global.value, bcSyn1Global.value)) {
-          case ((syn0, syn1), sentence) =>
+      val partial = newSentences.sample(true, sample, util.Random.nextLong()).map { sentence =>
+            val error = mutable.MutableList[(Int,Array[Float])]()
             var pos = 0
             while (pos < sentence.size) {
               val word = sentence(pos)
@@ -521,7 +522,7 @@ class SkipGram extends Serializable {
                   if (c >= 0 && c < sentence.size) {
                     val lastWord = sentence(c)
                     val l1 = lastWord * vectorSize
-                    val neu1e = new Array[Float](vectorSize)
+                    val neu0e = new Array[Float](vectorSize)
                     var target = word
                     var label = 1
                     for (d <- 0 to negative+1) {
@@ -535,7 +536,7 @@ class SkipGram extends Serializable {
                       if (target != lastWord || d == 0) {
                         val l2 = target * vectorSize
                         // Propagate hidden -> output
-                        var f = blas.sdot(vectorSize, syn0, l1, 1, syn1, l2, 1)
+                        var f = blas.sdot(vectorSize, syn0.value, l1, 1, syn1.value, l2, 1)
                         var g = 0.0f
                         if (f > MAX_EXP)
                           g = (label - 1) * alpha.toFloat
@@ -546,48 +547,51 @@ class SkipGram extends Serializable {
                           f = expTable.value(ind)
                           g = (label - f) * alpha.toFloat
                         }
-                        blas.saxpy(vectorSize, g, syn1, l2, 1, neu1e, 0, 1)
-                        blas.saxpy(vectorSize, g, syn0, l1, 1, syn1, l2, 1)
+                        blas.saxpy(vectorSize, g, syn1.value, l2, 1, neu0e, 0, 1)
+                        val neu1e = new Array[Float](vectorSize)
+                        blas.saxpy(vectorSize, g, syn0.value, l1, 1, neu1e, 0, 1)
+                        //syn1modify(target) += 1
+                        error+=(target+vocabSize)->neu1e
                       }
                     }
-                    blas.saxpy(vectorSize, 1.0f, neu1e, 0, 1, syn0, l1, 1)
+                    //blas.saxpy(vectorSize, 1.0f, neu1e, 0, 1, syn0, l1, 1)
+                    error+=lastWord->neu0e
+                    //syn0modify(lastWord) += 1
                   }
                 }
                 a += 1
               }
               pos += 1
             }
-            (syn0, syn1)
-        }
-        val syn0Local = model._1
-        val syn1Local = model._2
-        // Only output modified vectors.
-        Iterator.tabulate(vocabSize) { index =>
-          Some((index, syn0Local.slice(index * vectorSize, (index + 1) * vectorSize)))
-        }.flatten ++ Iterator.tabulate(vocabSize) { index =>
-          Some((index + vocabSize, syn1Local.slice(index * vectorSize, (index + 1) * vectorSize)))
-        }.flatten
+            //println(error.size)
+            error.toIterator
       }
-      val synAgg = partial.reduceByKey { case (v1, v2) =>
+      println(partial.count())
+      val synAgg = partial.flatMap(x=>x).reduceByKey { case (v1, v2) =>
         blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
         v1
       }.collect()
+      println(synAgg.length)
+      val synCount = partial.flatMap(x=>x).countByKey()
       var i = 0
       while (i < synAgg.length) {
         val index = synAgg(i)._1
-        if (index < vocabSize) {
-          Array.copy(synAgg(i)._2, 0, syn0Global, index * vectorSize, vectorSize)
-        } else {
-          Array.copy(synAgg(i)._2, 0, syn1Global, (index - vocabSize) * vectorSize, vectorSize)
+        if (synCount.get(index).isEmpty)
+          println("!!!"+index)
+        if (!synCount.get(index).isEmpty && synCount.get(index).get > 0) {
+          if (index < vocabSize) {
+            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn0Global, index * vectorSize, 1)
+            //Array.copy(synAgg(i)._2, 0, syn0Global, index * vectorSize, vectorSize)
+          } else {
+            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn1Global, (index - vocabSize) * vectorSize, 1)
+            //Array.copy(synAgg(i)._2, 0, syn1Global, (index - vocabSize) * vectorSize, vectorSize)
+          }
         }
         i += 1
       }
-      for (a <- 0 to syn0Global.size-1) {
-        syn0Global(a) /= numPartitions
-        syn1Global(a) /= numPartitions
-      }
-      bcSyn0Global.unpersist(false)
-      bcSyn1Global.unpersist(false)
+      syn0.unpersist(false)
+      syn1.unpersist(false)
+      println(syn0Global(0))
     }
     newSentences.unpersist()
 
@@ -598,8 +602,8 @@ class SkipGram extends Serializable {
 
 
 class Word2VecModel (
-                      private val wordIndex: Map[String, Int],
-                      private val wordVectors: Array[Float]){
+    private val wordIndex: Map[String, Int],
+    private val wordVectors: Array[Float]){
 
   private val numWords = wordIndex.size
   private val vectorSize = wordVectors.length / numWords
