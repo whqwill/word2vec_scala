@@ -19,8 +19,8 @@ object Main_local {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
     //val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val input = sc.textFile("19960820new.txt").map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).map(Preprocessing.map1).filter(Preprocessing.filter1).filter(Preprocessing.filter2)
+    val input = sc.textFile("19960820new_lemma.txt").map(line => line.split(" ").toSeq)
+    val words = input.flatMap(x => x).filter(s=>s(0).isLetter)
 
     //val tmp = words.mapPartitions(iter=>iter)
     // val tmp = words.collect()

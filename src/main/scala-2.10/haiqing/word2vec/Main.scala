@@ -74,4 +74,8 @@ object Preprocessing {
     else
       true
   }
+
+  def filter3(s: String): Boolean={
+    s(0).isLetter
+  }
 }
