@@ -40,7 +40,7 @@ object Main_local {
 
     //skipgram.cleanSyn()
 
-    val msskipgram = new MSSkipGram(skipgram).setNumPartitions(8).setNumIterations(400).setNegative(5).setNumSenses(2).setMinCount(5).setWindow(5).setVectorSize(100).setSample(0.05).setSentenceIter(20).setAdjustingRatio(0.7)
+    val msskipgram = new MSSkipGram(skipgram).setNumPartitions(8).setNumIterations(100).setNegative(5).setNumSenses(2).setMinCount(5).setWindow(5).setVectorSize(100).setSample(0.05).setSentenceIter(10).setAdjustingRatio(0.7)
     //val msskipgram = new MSSkipGram(skipgram).setNumPartitions(args(5).toInt).setNumIterations(args(6).toInt).setNegative(args(7).toInt).setNumSenses(args(8).toInt)
 
     val newModel = msskipgram.fit(words)

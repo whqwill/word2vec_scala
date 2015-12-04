@@ -343,6 +343,7 @@ class SkipGram extends Serializable {
   private var negative = 5
   private var window = 5
   private var sample = 0.01
+  private var subSampling = 0.0001
   def setSample(sample: Double): this.type = {
     this.sample = sample
     this
@@ -467,6 +468,7 @@ class SkipGram extends Serializable {
     val expTable = sc.broadcast(createExpTable())
     val bcVocabHash = sc.broadcast(vocabHash)
     val table = sc.broadcast(makeTable())
+    val bcVocab = sc.broadcast(vocab)
 
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -477,11 +479,11 @@ class SkipGram extends Serializable {
           var sentenceLength = 0
           while (iter.hasNext && sentenceLength < MAX_SENTENCE_LENGTH) {
             val word = bcVocabHash.value.get(iter.next())
-            word match {
-              case Some(w) =>
-                sentence += w
-                sentenceLength += 1
-              case None =>
+            // The subsampling randomly discards frequent words while keeping the ranking same
+            //if (word.nonEmpty && scala.math.sqrt((subSampling*trainWordsCount)/bcVocab.value(word.get).cn) > util.Random.nextDouble()) {
+            if (word.nonEmpty) {
+              sentence += word.get
+              sentenceLength += 1
             }
           }
           sentence.result()
