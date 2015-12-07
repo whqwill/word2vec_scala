@@ -1,5 +1,7 @@
 package haiqing.word2vec
 
+import java.io.{PrintWriter, File}
+
 import com.github.fommil.netlib.BLAS._
 import org.apache.spark.rdd.RDD
 
@@ -121,6 +123,8 @@ class MSSkipGram(
     }
     table
   }
+
+
 
   def fit (words: RDD[String]): Word2VecModel = {
     val sc = words.context
@@ -416,6 +420,8 @@ class SkipGram extends Serializable {
       .collect()
       .sortWith((a, b) => a.cn > b.cn)
 
+    for (a <- vocab.toIterator)
+      println(a)
     vocabSize = vocab.length
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
@@ -513,7 +519,7 @@ class SkipGram extends Serializable {
       val bcSyn1Global = sc.broadcast(syn1Global)
 
       alpha =
-        learningRate * (1 - sample*(k-1))
+        learningRate * (1 - (k-1)*1.0/numIterations)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
       println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
@@ -687,4 +693,20 @@ class Word2VecModel (
       (word, wordVectors.slice(vectorSize * ind, vectorSize * ind + vectorSize))
     }
   }
+
+  def save(path: String): Unit = {
+    val file1 = new PrintWriter(new File(path+"/wordIndex.txt"))
+    val file2 = new PrintWriter(new File(path+"/wordVectors.txt"))
+    val iter = wordIndex.toIterator
+    while (iter.hasNext) {
+      val tmp = iter.next()
+      file1.write(tmp._1+" "+tmp._2+"\n")
+    }
+    for (i <- 0 to wordVectors.size-2)
+      file2.write(wordVectors(i)+" ")
+    file2.write(wordVectors(wordVectors.size-1)+"\n")
+    file1.close()
+    file2.close()
+  }
 }
+
