@@ -21,8 +21,9 @@ object Main {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).filter(s=>s(0).isLetter).map(s=>s.toLowerCase)
+    val words = input.flatMap(x => x).map(s=>s.toLowerCase)
 
+    /*
     val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble)
 
     val model = skipgram.fit(words)
@@ -34,14 +35,17 @@ object Main {
 
     println()
 
+    model.save(args(9))
     //skipgram.cleanSyn()
 
-    val msskipgram = new MSSkipGram(skipgram).setNumPartitions(args(9).toInt).setNumIterations(args(10).toInt).setNegative(args(11).toInt).setNumSenses(args(12).toInt).setMinCount(args(13).toInt).setWindow(args(14).toInt).setVectorSize(args(15).toInt).setSample(args(16).toDouble).setSentenceIter(args(17).toInt).setAdjustingRatio(args(18).toDouble)
+    */
+
+    val msskipgram = new MSSkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setNumSenses(args(4).toInt).setMinCount(args(5).toInt).setWindow(args(6).toInt).setVectorSize(args(7).toInt).setSample(args(8).toDouble).setSentenceIter(args(9).toInt).setAdjustingRatio(args(10).toDouble).setPath(args(11)).setPrintRadio(args(12).toDouble).setTestWord(args(13))
 
     val newModel = msskipgram.fit(words)
 
-    for (i <- 0 to args(12).toInt-1) {
-      val newSynonyms = newModel.findSynonyms(args(19)+i, 10)
+    for (i <- 0 to args(4).toInt-1) {
+      val newSynonyms = newModel.findSynonyms(args(13)+i, 10)
 
       println()
       for ((synonym, cosineSimilarity) <- newSynonyms) {
@@ -64,8 +68,8 @@ object Preprocessing {
   }
 
   def map2(s: String): String={
-    if (s == "apple" && util.Random.nextDouble() <= 0.5)
-      "APPLE"
+    if (s == "bank" && util.Random.nextDouble() <= 0.5)
+      "BANK"
     else
       s
   }

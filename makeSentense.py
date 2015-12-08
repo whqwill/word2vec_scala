@@ -13,10 +13,13 @@ while True:
 		break
 	if len(line.split()) < 3:
 		continue
-	if not line.split()[2] in ("@card@","<unknown>"):
+	if line.split()[2] == "<unknown>":
+		fout.write(line.split()[0]+" ")
+	elif line.split()[2][0].isalpha():
 		fout.write(line.split()[2]+" ")
 	l += 1
 	if l == 100:
 		fout.write("\n")
+		l = 0
 	
 fout.close()
