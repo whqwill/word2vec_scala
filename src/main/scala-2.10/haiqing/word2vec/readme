@@ -1,0 +1,7 @@
+Word2Vec.scala.bk2 is the backup of summing errors version
+Word2Vec.scala.bk is the backup of averaging lookup-table version
+
+task now:
+1.MSSkipGram read lookup-table from file, parameter matrix is zero (averaging lookup-table version)
+2.SkipGram: summing errors version
+

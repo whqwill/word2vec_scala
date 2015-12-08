@@ -257,8 +257,13 @@ class MSSkipGram extends Serializable{
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
 
-      if (k > 0 && k % (numIterations/10) == 0) {
-        val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
+      if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
+        val wordArray = vocab.map(_.word)
+        val msWordArray = new Array[String](wordArray.size*numSenses)
+        for (a <- 0 to wordArray.size-1)
+          for (i <- 0 to numSenses-1)
+            msWordArray(i*wordArray.length+a) = wordArray(a)+i
+        val model = new Word2VecModel(msWordArray.zipWithIndex.toMap, syn0Global)
         for (i <- 0 to numSenses-1) {
           val newSynonyms = model.findSynonyms(testWord+i, 20)
           println()
