@@ -9,4 +9,3 @@ I am debuging the summing gradient version, there are something I need to change
 1.change the average of gradient to sum
 2.monitor the training, accuracy or loss??
 
-

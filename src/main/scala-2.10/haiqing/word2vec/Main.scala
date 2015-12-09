@@ -68,8 +68,8 @@ object Preprocessing {
   }
 
   def map2(s: String): String={
-    if (s == "bank" && util.Random.nextDouble() <= 0.5)
-      "BANK"
+    if (s == "say" && util.Random.nextDouble() <= 0.5)
+      "SAY"
     else
       s
   }
@@ -101,6 +101,16 @@ object Processing {
       wordIndex(pair(0))=pair(1).toInt
     }
     val wordVectors = Source.fromFile(path+"/wordVectors.txt").getLines().next().split(" ").map(s=>s.toFloat)
+    new Word2VecModel(wordIndex.toMap, wordVectors)
+  }
+
+  def loadTmpModel(path: String, k: Int): Word2VecModel = {
+    val wordIndex = collection.mutable.Map[String, Int]()
+    for (line <- Source.fromFile(path+"/wordIndex"+k+".txt").getLines()) {
+      val pair = line.split(" ")
+      wordIndex(pair(0))=pair(1).toInt
+    }
+    val wordVectors = Source.fromFile(path+"/wordVectors"+k+".txt").getLines().next().split(" ").map(s=>s.toFloat)
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
 }

@@ -450,6 +450,11 @@ class SkipGram extends Serializable {
   private var testWord : String = null
   private var printRadio = 0.1
   private var saveRadio = 0.1
+  private var savePath = "./"
+  def setSavePath(savePath: String): this.type = {
+    this.savePath = savePath
+    this
+  }
   def setPrintRadio(printRadio: Double): this.type = {
     this.printRadio = printRadio
     this
@@ -646,6 +651,26 @@ class SkipGram extends Serializable {
         }
       }
 
+
+      if (k > 0 && k %(numIterations*saveRadio).toInt == 0) {
+
+        val wordIndex = vocab.map(_.word).zipWithIndex.toMap
+        val wordVectors = syn0Global
+
+        val file1 = new PrintWriter(new File(savePath+"/wordIndex"+k+".txt"))
+        val file2 = new PrintWriter(new File(savePath+"/wordVectors"+k+".txt"))
+        val iter = wordIndex.toIterator
+        while (iter.hasNext) {
+          val tmp = iter.next()
+          file1.write(tmp._1+" "+tmp._2+"\n")
+        }
+        for (i <- 0 to wordVectors.size-2)
+          file2.write(wordVectors(i)+" ")
+        file2.write(wordVectors(wordVectors.size-1)+"\n")
+        file1.close()
+        file2.close()
+      }
+
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
 
@@ -711,7 +736,7 @@ class SkipGram extends Serializable {
           pos += 1
         }
         //println(error.size)
-        println(error.size)
+        //println(error.size)
         error.toIterator
       }
       //println(partial.count())
