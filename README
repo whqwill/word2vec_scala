@@ -1,0 +1,12 @@
+Word2Vec.scala.bk2 is the backup of summing gradient version
+Word2Vec.scala.bk is the backup of averaging lookup-table version
+
+task now:
+1.MSSkipGram read lookup-table from file, parameter matrix is zero (averaging lookup-table version)
+2.SkipGram: summing gradient version
+
+I am debuging the summing gradient version, there are something I need to change:
+1.change the average of gradient to sum
+2.monitor the training, accuracy or loss??
+
+
