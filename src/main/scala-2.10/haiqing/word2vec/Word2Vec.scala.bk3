@@ -640,9 +640,6 @@ class SkipGram extends Serializable {
 
       println("Iteration "+k)
 
-      val bcSyn0Global = sc.broadcast(syn0Global)
-      val bcSyn1Global = sc.broadcast(syn1Global)
-
       if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
         val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
         val newSynonyms = model.findSynonyms(testWord, 20)
@@ -650,55 +647,6 @@ class SkipGram extends Serializable {
         for ((synonym, cosineSimilarity) <- newSynonyms) {
           println(s"$synonym $cosineSimilarity")
         }
-
-        val loss = newSentences.map{sentence =>
-          var loss = 0.0
-          var pos = 0
-          while (pos < sentence.size) {
-            val word = sentence(pos)
-            val b = util.Random.nextInt(window)
-            var a = b
-            while (a < window * 2 + 1 - b) {
-              if (a != window) {
-                val c = pos - window + a
-                if (c >= 0 && c < sentence.size) {
-                  val lastWord = sentence(c)
-                  val l1 = lastWord * vectorSize
-                  val neu0e = new Array[Float](vectorSize)
-                  var target = word
-                  var label = 1
-                  for (d <- 0 to negative+1) {
-                    if (d > 0) {
-                      val idx = Math.abs(util.Random.nextLong()%TABEL_SIZE).toInt
-                      target = table.value(idx)
-                      if (target <= 0)
-                        target = (Math.abs(util.Random.nextLong())%(vocabSize-1)+1).toInt
-                      label = 0
-                    }
-                    if (target != lastWord || d == 0) {
-                      val l2 = target * vectorSize
-                      // Propagate hidden -> output
-                      var f = blas.sdot(vectorSize, bcSyn0Global.value, l1, 1, bcSyn1Global.value, l2, 1)
-                      if (f > MAX_EXP)
-                        f = expTable.value(expTable.value.size-1)
-                      else if (f < -MAX_EXP)
-                        f = expTable.value(0)
-                      else {
-                        val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
-                        f = expTable.value(ind)
-                      }
-                      loss += (label*Math.log(f)+(1-label)*Math.log(1-f))*(-1)
-                    }
-                  }
-                }
-              }
-              a += 1
-            }
-            pos += 1
-          }
-          loss
-        }.sum()
-        println("\n\n\nloss = "+loss+"\n\n\n")
       }
 
 
@@ -721,6 +669,9 @@ class SkipGram extends Serializable {
         file2.close()
       }
 
+      val bcSyn0Global = sc.broadcast(syn0Global)
+      val bcSyn1Global = sc.broadcast(syn1Global)
+
       alpha =
         learningRate * (1 - (k-1)*1.0/numIterations)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
@@ -729,7 +680,6 @@ class SkipGram extends Serializable {
 
       val partial = newSentences.sample(true, sample, util.Random.nextLong()).map { sentence =>
         val error = mutable.MutableList[(Int,Array[Float])]()
-        var loss = 0.0
         var pos = 0
         while (pos < sentence.size) {
           val word = sentence(pos)
@@ -737,13 +687,17 @@ class SkipGram extends Serializable {
           // Train Skip-gram
 
           //negative sampling
-          /*
+
           val negSample = new Array[Int](negative)
           for (i <- 0 to negative - 1) {
             negSample(i) = table.value(Math.abs(util.Random.nextLong() % TABEL_SIZE).toInt)
             if (negSample(i) <= 0)
               negSample(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
-          }*/
+          }
+
+          val neu1e = new Array[Array[Float]](negative+1)
+          for (i <- 0 to negative)
+            neu1e(i) = new Array[Float](vectorSize)
 
           var a = b
           while (a < window * 2 + 1 - b) {
@@ -755,35 +709,31 @@ class SkipGram extends Serializable {
                 val neu0e = new Array[Float](vectorSize)
                 var target = word
                 var label = 1
-                for (d <- 0 to negative+1) {
+                for (d <- 0 to negative) {
                   if (d > 0) {
-                    val idx = Math.abs(util.Random.nextLong()%TABEL_SIZE).toInt
-                    target = table.value(idx)
-                    if (target <= 0)
-                      target = (Math.abs(util.Random.nextLong())%(vocabSize-1)+1).toInt
-                    label = 0
+                    target = negSample(d - 1)
+                    label = 1
                   }
-                  if (target != lastWord || d == 0) {
+                  if (target % vocabSize != lastWord % vocabSize || d == 0) {
                     val l2 = target * vectorSize
                     // Propagate hidden -> output
                     var f = blas.sdot(vectorSize, bcSyn0Global.value, l1, 1, bcSyn1Global.value, l2, 1)
+                    var g = 0.0f
                     if (f > MAX_EXP)
-                      f = expTable.value(expTable.value.size-1)
+                      g = (label - 1) * alpha.toFloat
                     else if (f < -MAX_EXP)
-                      f = expTable.value(0)
+                      g = (label - 0) * alpha.toFloat
                     else {
                       val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
                       f = expTable.value(ind)
+                      g = (label - f) * alpha.toFloat
                     }
-                    val g = label - f
 
-                    loss += (label*Math.log(f)+(1-label)*Math.log(1-f))*(-1)
                     blas.saxpy(vectorSize, g, bcSyn1Global.value, l2, 1, neu0e, 0, 1)
-                    val neu1e = new Array[Float](vectorSize)
-                    blas.saxpy(vectorSize, g, bcSyn0Global.value, l1, 1, neu1e, 0, 1)
+                    blas.saxpy(vectorSize, g, bcSyn0Global.value, l1, 1, neu1e(d), 0, 1)
                     //syn1modify(target) += 1
-                    error+=(target+vocabSize)->neu1e
                   }
+
                 }
                 //blas.saxpy(vectorSize, 1.0f, neu1e, 0, 1, syn0, l1, 1)
                 error+=lastWord->neu0e
@@ -792,52 +742,40 @@ class SkipGram extends Serializable {
             }
             a += 1
           }
+
+          error+=word->neu1e(0)
+          for (i <- 0 to negative-1)
+            error+=negSample(i)->neu1e(i+1)
+
           pos += 1
         }
         //println(error.size)
-        //println(error.size)
-        Tuple2(error.toIterator,loss)
+        println(error.size)
+        error.toIterator
       }
       //println(partial.count())
-      val synAgg = partial.map(x=>x._1).flatMap(x=>x).reduceByKey { case (v1, v2) =>
+      val synAgg = partial.flatMap(x=>x).reduceByKey { case (v1, v2) =>
         blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
         v1
       }.collect()
       //println(synAgg.length)
-      val synCount = partial.map(x=>x._1).flatMap(x=>x).countByKey()
-      val loss = partial.map(x=>x._2).sum()
+      val synCount = partial.flatMap(x=>x).countByKey()
       var i = 0
-
-      //var diff = 0.0f
-
-
       while (i < synAgg.length) {
         val index = synAgg(i)._1
         //if (synCount.get(index).isEmpty)
         //  println("!!!"+index)
-
-        //synCount.get(index).get
         if (!synCount.get(index).isEmpty && synCount.get(index).get > 0) {
-
-          //for (j <- 0 to synAgg(i)._2.size-1)
-          //  diff += Math.abs(synAgg(i)._2(j)/synCount.get(index).get)
-
           if (index < vocabSize) {
-            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get * alpha.toFloat, synAgg(i)._2, 0, 1, syn0Global, index * vectorSize, 1)
+            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn0Global, index * vectorSize, 1)
             //Array.copy(synAgg(i)._2, 0, syn0Global, index * vectorSize, vectorSize)
           } else {
-            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get * alpha.toFloat, synAgg(i)._2, 0, 1, syn1Global, (index - vocabSize) * vectorSize, 1)
+            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn1Global, (index - vocabSize) * vectorSize, 1)
             //Array.copy(synAgg(i)._2, 0, syn1Global, (index - vocabSize) * vectorSize, vectorSize)
           }
         }
         i += 1
       }
-
-
-      //if (k % 10 == 0)
-      println("\nloss = " + loss+"\n")
-
-
       bcSyn0Global.unpersist(false)
       bcSyn1Global.unpersist(false)
     }

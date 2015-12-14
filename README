@@ -1,3 +1,4 @@
+Word2Vec.scala.bk2 is the backup of summing gradient and less negative sampling version 
 Word2Vec.scala.bk2 is the backup of summing gradient version
 Word2Vec.scala.bk is the backup of averaging lookup-table version
 
@@ -9,3 +10,7 @@ I am debuging the summing gradient version, there are something I need to change
 1.change the average of gradient to sum
 2.monitor the training, accuracy or loss??
 
+another version is possible: change negative sampling of lastword to negative sampling of word
+
+loss of training dataset is to evaluate the convergence of algorithm
+loss of testing dataset is to evaluate if the algorithm is good
