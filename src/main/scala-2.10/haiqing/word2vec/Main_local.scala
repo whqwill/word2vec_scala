@@ -27,13 +27,11 @@ object Main_local {
     // val tmp = words.collect()
 
     //val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt)
-    val skipgram = new SkipGram().setNumPartitions(8).setNumIterations(20000).setNegative(5).setMinCount(5).setWindow(5).setVectorSize(100).setSample(0.01).setPrintRadio(0.001).setTestWord("say").setSaveRadio(0.1).setSavePath("./data_summing_version")
+    val skipgram = new SkipGram().setNumPartitions(8).setNumIterations(400).setNegative(5).setMinCount(5).setWindow(5).setVectorSize(100).setSample(0.01).setDisplay(20).setTestWord("say").setMAX_SENTENCE_LENGTH(10).setTrainingInformation("./training.txt")
     val model = skipgram.fit(words)
     //val synonyms = model.findSynonyms(args(4), 10)
 
     model.save("./data_summing_version")
-
-
 
     val synonyms = model.findSynonyms("say", 20)
     //val synonyms = model.findSynonyms("day", 10)

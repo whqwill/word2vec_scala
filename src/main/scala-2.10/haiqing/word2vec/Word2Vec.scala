@@ -448,15 +448,25 @@ class SkipGram extends Serializable {
   private var sample = 0.01
   private var subSampling = 0.0001
   private var testWord : String = null
-  private var printRadio = 0.1
-  private var saveRadio = 0.1
+  private var display = 0
+  private var saveRadio = 0.0
   private var savePath = "./"
+  private var MAX_SENTENCE_LENGTH = 200
+  private var trainingInformation = ""
+  def setTrainingInformation(trainingInformation: String): this.type = {
+    this.trainingInformation = trainingInformation
+    this
+  }
+  def setMAX_SENTENCE_LENGTH(MAX_SENTENCE_LENGTH: Int): this.type = {
+    this.MAX_SENTENCE_LENGTH = MAX_SENTENCE_LENGTH
+    this
+  }
   def setSavePath(savePath: String): this.type = {
     this.savePath = savePath
     this
   }
-  def setPrintRadio(printRadio: Double): this.type = {
-    this.printRadio = printRadio
+  def setDisplay(display: Int): this.type = {
+    this.display = display
     this
   }
   def setSaveRadio(saveRadio: Double): this.type = {
@@ -507,7 +517,7 @@ class SkipGram extends Serializable {
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
-  private val MAX_SENTENCE_LENGTH = 1000
+
   private val POWER = 0.75
   private val TABEL_SIZE = 10000
   private var trainWordsCount = 0
@@ -539,8 +549,8 @@ class SkipGram extends Serializable {
       .collect()
       .sortWith((a, b) => a.cn > b.cn)
 
-    for (a <- vocab.toIterator)
-      println(a)
+    //for (a <- vocab.toIterator)
+    //  println(a)
     vocabSize = vocab.length
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
@@ -632,23 +642,39 @@ class SkipGram extends Serializable {
     }
 
     var alpha = learningRate
-    println("Debug vocab size = " )
+    //println("Debug vocab size = " )
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
+    var file :PrintWriter= null
+    if (trainingInformation != "")
+      file = new PrintWriter(new File(trainingInformation))
     for (k <- 1 to numIterations) {
 
-      println("Iteration "+k)
+      println("Iteration "+k+" /"+numIterations)
 
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
 
-      if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
-        val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
-        val newSynonyms = model.findSynonyms(testWord, 20)
-        println()
-        for ((synonym, cosineSimilarity) <- newSynonyms) {
-          println(s"$synonym $cosineSimilarity")
+      if (display > 0 && k > 0 && k % display == 0) {
+
+        if (trainingInformation == "") {
+          println("Iteration " + k + "\n")
+          val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
+          val newSynonyms = model.findSynonyms(testWord, 20)
+          println()
+          for ((synonym, cosineSimilarity) <- newSynonyms) {
+            println(s"$synonym $cosineSimilarity")
+          }
+        }
+        else {
+          file.write("Iteration " + k + "\n\n")
+          val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
+          val newSynonyms = model.findSynonyms(testWord, 20)
+          for ((synonym, cosineSimilarity) <- newSynonyms) {
+            file.write(s"$synonym $cosineSimilarity"+"\n")
+          }
+          file.write("\n")
         }
 
         val loss = newSentences.map{sentence =>
@@ -698,11 +724,17 @@ class SkipGram extends Serializable {
           }
           loss
         }.sum()
-        println("\n\n\nloss = "+loss+"\n\n\n")
+
+        println("\nloss = " + loss)
+        println("wordCount = " + (sample * (k - 1) * trainWordsCount).toInt + ", alpha = " + alpha + "\n")
+        if (trainingInformation != "") {
+          file.write("\nloss = " + loss+"\n")
+          file.write("wordCount = " + (sample * (k - 1) * trainWordsCount).toInt + ", alpha = " + alpha + "\n\n")
+        }
       }
 
 
-      if (k > 0 && k %(numIterations*saveRadio).toInt == 0) {
+      if (saveRadio > 0 && k > 0 && k %(numIterations*saveRadio).toInt == 0) {
 
         val wordIndex = vocab.map(_.word).zipWithIndex.toMap
         val wordVectors = syn0Global
@@ -725,11 +757,10 @@ class SkipGram extends Serializable {
         learningRate * (1 - (k-1)*1.0/numIterations)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
+
 
       val partial = newSentences.sample(true, sample, util.Random.nextLong()).map { sentence =>
         val error = mutable.MutableList[(Int,Array[Float])]()
-        var loss = 0.0
         var pos = 0
         while (pos < sentence.size) {
           val word = sentence(pos)
@@ -777,7 +808,6 @@ class SkipGram extends Serializable {
                     }
                     val g = label - f
 
-                    loss += (label*Math.log(f)+(1-label)*Math.log(1-f))*(-1)
                     blas.saxpy(vectorSize, g, bcSyn1Global.value, l2, 1, neu0e, 0, 1)
                     val neu1e = new Array[Float](vectorSize)
                     blas.saxpy(vectorSize, g, bcSyn0Global.value, l1, 1, neu1e, 0, 1)
@@ -796,16 +826,16 @@ class SkipGram extends Serializable {
         }
         //println(error.size)
         //println(error.size)
-        Tuple2(error.toIterator,loss)
+        error.toIterator
       }
       //println(partial.count())
-      val synAgg = partial.map(x=>x._1).flatMap(x=>x).reduceByKey { case (v1, v2) =>
+      val synAgg = partial.flatMap(x=>x).reduceByKey { case (v1, v2) =>
         blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
         v1
       }.collect()
       //println(synAgg.length)
-      val synCount = partial.map(x=>x._1).flatMap(x=>x).countByKey()
-      val loss = partial.map(x=>x._2).sum()
+      val synCount = partial.flatMap(x=>x).countByKey()
+
       var i = 0
 
       //var diff = 0.0f
@@ -832,10 +862,6 @@ class SkipGram extends Serializable {
         }
         i += 1
       }
-
-
-      //if (k % 10 == 0)
-      println("\nloss = " + loss+"\n")
 
 
       bcSyn0Global.unpersist(false)
