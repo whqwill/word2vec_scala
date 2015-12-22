@@ -600,7 +600,11 @@ class SkipGram extends Serializable {
 
   }
 
-  def fit (words: RDD[String]): Word2VecModel = {
+  def fit (words: RDD[String], filePath: String): Word2VecModel = {
+
+
+
+
     learnVocab(words)
 
     println("vocabSize: "+vocabSize)
@@ -646,9 +650,15 @@ class SkipGram extends Serializable {
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
+
+    val lines = Source.fromFile(filePath).getLines()
+    val data: Array[String] = new Array[String](100)
+
     var file :PrintWriter= null
     if (trainingInformation != "")
       file = new PrintWriter(new File(trainingInformation))
+
+    numIterations = 50
     for (k <- 1 to numIterations) {
 
       println("Iteration "+k+" /"+numIterations)
@@ -656,6 +666,7 @@ class SkipGram extends Serializable {
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
 
+      /*
       if (display > 0 && k > 0 && k % display == 0) {
 
         if (trainingInformation == "") {
@@ -753,17 +764,21 @@ class SkipGram extends Serializable {
         file2.close()
       }
 
+*/
       alpha =
         learningRate * (1 - (k-1)*1.0/numIterations)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
 
 
-      val partial = newSentences.sample(true, sample, util.Random.nextLong()).map { sentence =>
+      lines.copyToArray(data, 0, 100)
+      val partial = sc.parallelize(data).map { sentence =>
+        val newSentence = sentence.split(" ")
+        //println(newSentence(0))
         val error = mutable.MutableList[(Int,Array[Float])]()
         var pos = 0
-        while (pos < sentence.size) {
-          val word = sentence(pos)
+        while (pos < newSentence.size && !bcVocabHash.value.get(newSentence(pos)).isEmpty) {
+          val word = bcVocabHash.value.get(newSentence(pos)).get
           val b = util.Random.nextInt(window)
           // Train Skip-gram
 
@@ -780,8 +795,8 @@ class SkipGram extends Serializable {
           while (a < window * 2 + 1 - b) {
             if (a != window) {
               val c = pos - window + a
-              if (c >= 0 && c < sentence.size) {
-                val lastWord = sentence(c)
+              if (c >= 0 && c < newSentence.size && !bcVocabHash.value.get(newSentence(c)).isEmpty) {
+                val lastWord = bcVocabHash.value.get(newSentence(c)).get
                 val l1 = lastWord * vectorSize
                 val neu0e = new Array[Float](vectorSize)
                 var target = word
@@ -825,7 +840,7 @@ class SkipGram extends Serializable {
           pos += 1
         }
         //println(error.size)
-        //println(error.size)
+        println(error.size)
         error.toIterator
       }
       //println(partial.count())

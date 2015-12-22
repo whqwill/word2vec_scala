@@ -20,7 +20,7 @@ object Main_local {
     println(sc.defaultParallelism + "   " + sc.master)
     //val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
     val input = sc.textFile("19960820new_lemma.txt").map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).map(s=>s.toLowerCase).map(Preprocessing.map2)
+    val words = input.flatMap(x => x)//.map(s=>s.toLowerCase).map(Preprocessing.map2)
 
 
     //val tmp = words.mapPartitions(iter=>iter)
@@ -28,12 +28,12 @@ object Main_local {
 
     //val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt)
     val skipgram = new SkipGram().setNumPartitions(8).setNumIterations(400).setNegative(5).setMinCount(5).setWindow(5).setVectorSize(100).setSample(0.01).setDisplay(20).setTestWord("say").setMAX_SENTENCE_LENGTH(10).setTrainingInformation("./training.txt")
-    val model = skipgram.fit(words)
+    val model = skipgram.fit(words, "19960820new_lemma.txt")
     //val synonyms = model.findSynonyms(args(4), 10)
 
     model.save("./data_summing_version")
 
-    val synonyms = model.findSynonyms("say", 20)
+    val synonyms = model.findSynonyms("bank", 20)
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {

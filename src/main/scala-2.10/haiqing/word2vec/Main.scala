@@ -26,7 +26,7 @@ object Main {
 
     val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble).setDisplay(args(8).toInt).setTestWord(args(9)).setMAX_SENTENCE_LENGTH(args(10).toInt)
 
-    val model = skipgram.fit(words)
+    val model = skipgram.fit(words, args(0))
     val synonyms = model.findSynonyms(args(9), 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {

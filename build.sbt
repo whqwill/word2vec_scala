@@ -1,4 +1,4 @@
-mainClass in assembly := Some("haiqing.word2vec.Main")
+mainClass in assembly := Some("haiqing.word2vec.TestSaveFile")
 
 assemblyJarName in assembly := "word2vec.jar"
 
