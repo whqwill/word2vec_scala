@@ -14,3 +14,6 @@ another version is possible: change negative sampling of lastword to negative sa
 
 loss of training dataset is to evaluate the convergence of algorithm
 loss of testing dataset is to evaluate if the algorithm is good
+
+NEXT TASK:
+TRAIN NEW VERSION OF MSSKIPGRAM
