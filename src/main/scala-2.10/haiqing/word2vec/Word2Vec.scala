@@ -133,6 +133,8 @@ class MSSkipGram extends Serializable{
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var syn0Global: Array[Float] = null
   private var syn1Global: Array[Float] = null
+  private var syn0GlobalMS: Array[Float] = null
+  private var syn1GlobalMS: Array[Float] = null
 
   private def createExpTable(): Array[Float] = {
     val expTable = new Array[Float](EXP_TABLE_SIZE)
@@ -183,6 +185,75 @@ class MSSkipGram extends Serializable{
       trainWordsCount += vocab(a).cn
       a += 1
     }
+  }
+
+  private def activeFunction(syn0 :Array[Float], syn1 :Array[Float], l0: Int, l1: Int, expTable: Array[Float], vectorSize: Int, MAX_EXP: Int): Double = {
+    var f = blas.sdot(vectorSize, syn0, l0, 1, syn1, l1, 1)
+    if (f > MAX_EXP)
+      f = expTable(expTable.length - 1)
+    else if (f < -MAX_EXP)
+      f = expTable(0)
+    else {
+      val ind = ((f + MAX_EXP) * (expTable.size / MAX_EXP / 2.0)).toInt
+      f = expTable(ind)
+    }
+    f
+  }
+
+  private def getScore(syn0 :Array[Float], syn1 :Array[Float], NEG: Array[Int], posW: Int, sentence: Array[Int], expTable: Array[Float], window: Int, vectorSize: Int, vocabSize: Int, MAX_EXP: Int): Double = {
+    var score = 0.0
+    val w = sentence(posW)
+    for (posU <- posW-window+1 to posW+window-1) {
+      if (posU >= 0 && posU < sentence.size && posW != posW) {
+          val u = sentence(posU)
+          val l0 = u * vectorSize
+          val l1 = w * vectorSize
+          score += math.log(activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP))
+
+          for (d <- 0 to NEG.size-1) {
+              val Z = NEG(d)
+              val l1 = Z * vectorSize
+              score += math.log(1-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP))
+          }
+      }
+    }
+    score
+  }
+
+  private def getGradientU(syn0 :Array[Float], syn1 :Array[Float],  w: Int, u: Int, NEG: Array[Int], expTable: Array[Float], vectorSize: Int, vocabSize: Int, MAX_EXP: Int): Array[Float] = {
+        val Delta = new Array[Float](vectorSize)
+
+          val l0 = u * vectorSize
+          var Z = w
+          var label = 1
+
+          for (d <- -1 to NEG.size-1) {
+              if (d >= 0) {
+                  Z = NEG(d)
+                  label = 0
+              }
+
+              val l1 = Z * vectorSize
+              val g = (label-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP)).toFloat
+
+              blas.saxpy(vectorSize, g, syn0, l0, 1, Delta, 0, 1)
+          }
+        Delta
+  }
+
+  private def getGradientZ(syn0 :Array[Float], syn1 :Array[Float],  posW: Int, Z: Int, label: Int, window: Int, sentence: Array[Int], expTable: Array[Float], vectorSize: Int, vocabSize: Int, MAX_EXP: Int): Array[Float] = {
+        val Delta = new Array[Float](vectorSize)
+        for (posU <- posW-window+1 to posW+window-1) {
+          if (posU >= 0 && posU < sentence.size && posW != posW) {
+            val u = sentence(posU)
+            val l0 = u * vectorSize
+            val l1 = Z * vectorSize
+            val g = (label-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP)).toFloat
+
+            blas.saxpy(vectorSize, g, syn1, l1, 1, Delta, 0, 1)
+          }
+        }
+        Delta
   }
 
   def fit (words: RDD[String]): Word2VecModel = {
@@ -339,38 +410,7 @@ class MSSkipGram extends Serializable{
                   var a = b
                   var score = 1.0
                   word = word % vocabSize + vocabSize * sense
-                  while (a < window * 2 + 1 - b) {
-                    if (a != window) {
-                      val c = pos - window + a
-                      if (c >= 0 && c < sentence.size) {
-                        val lastWord = sentence(c)
-                        val l1 = lastWord * vectorSize
-                        var target = word
-                        var label = 0
-                        for (d <- 0 to negative) {
-                          if (d > 0) {
-                            target = negSample(d - 1)
-                            label = 1
-                          }
-                          if (target % vocabSize != lastWord % vocabSize || d == 0) {
-                            val l2 = target * vectorSize
-                            // Propagate hidden -> output
-                            var f = blas.sdot(vectorSize, syn0, l1, 1, syn1, l2, 1)
-                            if (f > MAX_EXP)
-                              f = expTable.value(expTable.value.length - 1)
-                            else if (f < -MAX_EXP)
-                              f = expTable.value(0)
-                            else {
-                              val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
-                              f = expTable.value(ind)
-                            }
-                            score *= Math.abs(label - f)
-                          }
-                        }
-                      }
-                    }
-                    a += 1
-                  }
+
                   if (bestSense == -1 || score > bestScore) {
                     bestScore = score
                     bestSense = sense
@@ -606,6 +646,75 @@ class SkipGram extends Serializable {
 
   }
 
+  private def activeFunction(syn0 :Array[Float], syn1 :Array[Float], l0: Int, l1: Int, expTable: Array[Float], vectorSize: Int, MAX_EXP: Int): Double = {
+    var f = blas.sdot(vectorSize, syn0, l0, 1, syn1, l1, 1)
+    if (f > MAX_EXP)
+      f = expTable(expTable.length - 1)
+    else if (f < -MAX_EXP)
+      f = expTable(0)
+    else {
+      val ind = ((f + MAX_EXP) * (expTable.size / MAX_EXP / 2.0)).toInt
+      f = expTable(ind)
+    }
+    f
+  }
+
+  private def getScore(syn0 :Array[Float], syn1 :Array[Float], NEG: Array[Int], posW: Int, sentence: Array[Int], expTable: Array[Float], window: Int, vectorSize: Int, vocabSize: Int, MAX_EXP: Int): Double = {
+    var score = 0.0
+    val w = sentence(posW)
+    for (posU <- posW-window+1 to posW+window-1) {
+      if (posU >= 0 && posU < sentence.size && posW != posW) {
+        val u = sentence(posU)
+        val l1 = u * vectorSize
+        val l0 = w * vectorSize
+        score += math.log(activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP))
+
+        for (d <- 0 to NEG.size-1) {
+          val Z = NEG(d)
+          val l0 = Z * vectorSize
+          score += math.log(1-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP))
+        }
+      }
+    }
+    score
+  }
+
+  private def getGradientU(syn0 :Array[Float], syn1 :Array[Float],  w: Int, u: Int, NEG: Array[Int], expTable: Array[Float], vectorSize: Int, MAX_EXP: Int): Array[Float] = {
+    val Delta = new Array[Float](vectorSize)
+
+    val l1 = u * vectorSize
+    var Z = w
+    var label = 1
+
+    for (d <- -1 to NEG.size-1) {
+      if (d >= 0) {
+        Z = NEG(d)
+        label = 0
+      }
+
+      val l0 = Z * vectorSize
+      val g = (label-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP)).toFloat
+
+      blas.saxpy(vectorSize, g, syn0, l0, 1, Delta, 0, 1)
+    }
+    Delta
+  }
+
+  private def getGradientZ(syn0 :Array[Float], syn1 :Array[Float],  posW: Int, Z: Int, label: Int, window: Int, sentence: Array[Int], expTable: Array[Float], vectorSize: Int, MAX_EXP: Int): Array[Float] = {
+    val Delta = new Array[Float](vectorSize)
+    for (posU <- posW-window+1 to posW+window-1) {
+      if (posU >= 0 && posU < sentence.size && posU != posW) {
+        val u = sentence(posU)
+        val l1 = u * vectorSize
+        val l0 = Z * vectorSize
+        val g = (label-activeFunction(syn0, syn1, l0, l1, expTable, vectorSize, MAX_EXP)).toFloat
+
+        blas.saxpy(vectorSize, g, syn1, l1, 1, Delta, 0, 1)
+      }
+    }
+    Delta
+  }
+
   def fit (words: RDD[String]): Word2VecModel = {
     learnVocab(words)
 
@@ -615,7 +724,6 @@ class SkipGram extends Serializable {
     val expTable = sc.broadcast(createExpTable())
     val bcVocabHash = sc.broadcast(vocabHash)
     val table = sc.broadcast(makeTable())
-    val bcVocab = sc.broadcast(vocab)
 
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -639,36 +747,37 @@ class SkipGram extends Serializable {
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    util.Random.setSeed(seed)
 
+    /*
     if (vocabSize.toLong * vectorSize * 8 >= Int.MaxValue) {
       throw new RuntimeException("Please increase minCount or decrease vectorSize in Word2Vec" +
         " to avoid an OOM. You are highly recommended to make your vocabSize*vectorSize, " +
         "which is " + vocabSize + "*" + vectorSize + " for now, less than `Int.MaxValue/8`.")
-    }
+    }*/
 
     var alpha = learningRate
     println("Debug vocab size = " )
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
-
+    val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
 
     for (k <- 1 to numIterations) {
 
       println("Iteration "+k)
 
-      if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
+      /*if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
         val model = new Word2VecModel(vocab.map(_.word).zipWithIndex.toMap, syn0Global)
         val newSynonyms = model.findSynonyms(testWord, 20)
         println()
         for ((synonym, cosineSimilarity) <- newSynonyms) {
           println(s"$synonym $cosineSimilarity")
         }
-      }
+      }*/
 
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
+      val bcSeed = sc.broadcast(k*seed)
 
       alpha =
         learningRate * (1 - (k-1)*1.0/numIterations)
@@ -676,87 +785,72 @@ class SkipGram extends Serializable {
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
       println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
 
-      val partial = newSentences.sample(true, sample, util.Random.nextLong()).map { sentence =>
-        val error = mutable.MutableList[(Int,Array[Float])]()
-        var pos = 0
-        while (pos < sentence.size) {
-          val word = sentence(pos)
-          val b = util.Random.nextInt(window)
-          // Train Skip-gram
-          var a = b
-          while (a < window * 2 + 1 - b) {
-            if (a != window) {
-              val c = pos - window + a
-              if (c >= 0 && c < sentence.size) {
-                val lastWord = sentence(c)
-                val l1 = lastWord * vectorSize
-                val neu0e = new Array[Float](vectorSize)
-                var target = word
-                var label = 1
-                for (d <- 0 to negative+1) {
-                  if (d > 0) {
-                    val idx = Math.abs(util.Random.nextLong()%TABEL_SIZE).toInt
-                    target = table.value(idx)
-                    if (target <= 0)
-                      target = (Math.abs(util.Random.nextLong())%(vocabSize-1)+1).toInt
-                    label = 0
-                  }
-                  if (target != lastWord || d == 0) {
-                    val l2 = target * vectorSize
-                    // Propagate hidden -> output
-                    var f = blas.sdot(vectorSize, bcSyn0Global.value, l1, 1, bcSyn1Global.value, l2, 1)
-                    var g = 0.0f
-                    if (f > MAX_EXP)
-                      g = (label - 1) * alpha.toFloat
-                    else if (f < -MAX_EXP)
-                      g = (label - 0) * alpha.toFloat
-                    else {
-                      val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
-                      f = expTable.value(ind)
-                      g = (label - f) * alpha.toFloat
-                    }
-                    blas.saxpy(vectorSize, g, bcSyn1Global.value, l2, 1, neu0e, 0, 1)
-                    val neu1e = new Array[Float](vectorSize)
-                    blas.saxpy(vectorSize, g, bcSyn0Global.value, l1, 1, neu1e, 0, 1)
-                    //syn1modify(target) += 1
-                    error+=(target+vocabSize)->neu1e
-                  }
-                }
-                //blas.saxpy(vectorSize, 1.0f, neu1e, 0, 1, syn0, l1, 1)
-                error+=lastWord->neu0e
-                //syn0modify(lastWord) += 1
-              }
+      val syn0Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
+      val syn1Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
+
+      sentenceSplit((k-1)%((1/sample).toInt)) = sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx, iter) =>
+
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+
+        util.Random.setSeed(bcSeed.value+idx)
+
+        val newSentenseIter = mutable.MutableList[Array[Int]]()
+
+        while (iter.hasNext) {
+
+          val sentence = iter.next()
+
+          for (posW <- 0 to sentence.size-1) {
+
+            val w = sentence(posW)
+            val NEG = new Array[Int](negative)
+            for (i <- 0 to negative - 1) {
+              NEG(i) = table.value(Math.abs(util.Random.nextLong() % TABEL_SIZE).toInt)
+              if (NEG(i) <= 0)
+                NEG(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
             }
-            a += 1
+
+            for (posU <- posW-window+1 to posW+window-1)
+              if (posU >= 0 && posU < sentence.size && posU != posW) {
+                  val u = sentence(posU)
+                  val l1 = u * vectorSize
+
+                  val deltaU = getGradientU(syn0,syn1,w,u,NEG,expTable.value,vectorSize,MAX_EXP)
+
+                  blas.saxpy(vectorSize, alpha.toFloat, deltaU, 0, 1, syn1, l1, 1)
+              }
+
+            var Z = w
+            var label = 1
+            for (d <- -1 to NEG.size-1) {
+              if (d >= 0) {
+                  Z = NEG(d)
+                  label = 0
+              }
+
+              val l0 = Z * vectorSize
+              val deltaZ = getGradientZ(syn0,syn1,posW,Z,label,window,sentence,expTable.value,vectorSize,MAX_EXP)
+              blas.saxpy(vectorSize, alpha.toFloat, deltaZ, 0, 1, syn0, l0, 1)
+            }
           }
-          pos += 1
+          newSentenseIter+=sentence
         }
-        //println(error.size)
-        println(error.size)
-        error.toIterator
+
+        syn0Accum += syn0
+        syn1Accum += syn1
+
+        newSentenseIter.toIterator
       }
-      //println(partial.count())
-      val synAgg = partial.flatMap(x=>x).reduceByKey { case (v1, v2) =>
-        blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
-        v1
-      }.collect()
-      //println(synAgg.length)
-      val synCount = partial.flatMap(x=>x).countByKey()
-      var i = 0
-      while (i < synAgg.length) {
-        val index = synAgg(i)._1
-        //if (synCount.get(index).isEmpty)
-        //  println("!!!"+index)
-        if (!synCount.get(index).isEmpty && synCount.get(index).get > 0) {
-          if (index < vocabSize) {
-            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn0Global, index * vectorSize, 1)
-            //Array.copy(synAgg(i)._2, 0, syn0Global, index * vectorSize, vectorSize)
-          } else {
-            blas.saxpy(vectorSize, 1.0f / synCount.get(index).get, synAgg(i)._2, 0, 1, syn1Global, (index - vocabSize) * vectorSize, 1)
-            //Array.copy(synAgg(i)._2, 0, syn1Global, (index - vocabSize) * vectorSize, vectorSize)
-          }
-        }
-        i += 1
+      sentenceSplit((k-1)%((1/sample).toInt)).count()
+
+
+      syn0Global = syn0Accum.value
+      syn1Global = syn1Accum.value
+
+      for (a <- 0 to syn0Global.size-1) {
+        syn0Global(a) /= numPartitions
+        syn1Global(a) /= numPartitions
       }
       bcSyn0Global.unpersist(false)
       bcSyn1Global.unpersist(false)

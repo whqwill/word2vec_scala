@@ -22,7 +22,7 @@ object Main {
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
     val words = input.flatMap(x => x).map(s=>s.toLowerCase)
-
+/*
 
     val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble).setDisplay(args(8).toInt).setTestWord(args(9)).setMAX_SENTENCE_LENGTH(args(10).toInt)
 
@@ -37,7 +37,7 @@ object Main {
 
     model.save(args(11))
     //skipgram.cleanSyn()
-
+*/
     /*
 
     val msskipgram = new MSSkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setNumSenses(args(4).toInt).setMinCount(args(5).toInt).setWindow(args(6).toInt).setVectorSize(args(7).toInt).setSample(args(8).toDouble).setSentenceIter(args(9).toInt).setAdjustingRatio(args(10).toDouble).setPath(args(11)).setPrintRadio(args(12).toDouble).setTestWord(args(13))
