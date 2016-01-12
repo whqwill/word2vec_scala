@@ -22,12 +22,12 @@ object Main {
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
     val words = input.flatMap(x => x).map(s=>s.toLowerCase)
-/*
 
-    val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble).setDisplay(args(8).toInt).setTestWord(args(9)).setMAX_SENTENCE_LENGTH(args(10).toInt)
 
-    val model = skipgram.fit(words, args(0))
-    val synonyms = model.findSynonyms(args(9), 10)
+    val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble)
+
+    val model = skipgram.fit(words)
+    val synonyms = model.findSynonyms(args(8), 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")
@@ -35,23 +35,22 @@ object Main {
 
     println()
 
-    model.save(args(11))
+    //model.save(args(11))
     //skipgram.cleanSyn()
-*/
-    /*
 
-    val msskipgram = new MSSkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setNumSenses(args(4).toInt).setMinCount(args(5).toInt).setWindow(args(6).toInt).setVectorSize(args(7).toInt).setSample(args(8).toDouble).setSentenceIter(args(9).toInt).setAdjustingRatio(args(10).toDouble).setPath(args(11)).setPrintRadio(args(12).toDouble).setTestWord(args(13))
+
+    val msskipgram = new MSSkipGram().setSkipGram(skipgram).setNumPartitions(args(9).toInt).setNumIterations(args(10).toInt).setNegative(args(11).toInt).setNumSenses(args(12).toInt).setMinCount(args(13).toInt).setWindow(args(14).toInt).setVectorSize(args(15).toInt).setSample(args(16).toDouble).setSentenceIter(args(17).toInt)
 
     val newModel = msskipgram.fit(words)
 
-    for (i <- 0 to args(4).toInt-1) {
-      val newSynonyms = newModel.findSynonyms(args(13)+i, 10)
+    for (i <- 0 to args(12).toInt-1) {
+      val newSynonyms = newModel.findSynonyms(args(18)+i, 10)
 
       println()
       for ((synonym, cosineSimilarity) <- newSynonyms) {
         println(s"$synonym $cosineSimilarity")
       }
-    }*/
+    }
 
     println("total time:"+(currentTime-startTime)/1000.0)
   }
