@@ -14,7 +14,7 @@ object Main_local {
     val conf = new SparkConf().setAppName("Word2Vec")
     if (!conf.contains("spark.master"))
     {
-      conf.setMaster("local[4]")
+      conf.setMaster("local[*]")
     }
     val sc = new SparkContext(conf)
 
@@ -22,7 +22,7 @@ object Main_local {
 
     println(sc.defaultParallelism + "   " + sc.master)
     //val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val input = sc.textFile("news.2013.en.short.lemma").map(line => line.split(" ").toSeq)
+    val input = sc.textFile("news.2013.en.short.lemma",8).map(line => line.split(" ").toSeq)
     val words = input.flatMap(x => x).map(s=>s.toLowerCase).map(Preprocessing.map2)
 
 

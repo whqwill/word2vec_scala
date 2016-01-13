@@ -330,7 +330,7 @@ class MSSkipGram extends Serializable{
       }
     }
 
-    val newSentences = sentences.repartition(numPartitions)
+    val newSentences = sentences.coalesce(numPartitions).cache()
 
     /*
     if (vocabSize.toLong * vectorSize * 8 >= Int.MaxValue) {
@@ -381,8 +381,13 @@ class MSSkipGram extends Serializable{
       val syn1Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize * numSenses))(ArrayAccumulatorParam)
 
 
+      if (k == 11) {
+        var iii = 0
+        iii = 1
+      }
 
-      val tmpRDD = sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
+      val tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
+      //sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
 
         //println(iter.size)
         val syn0 = bcSyn0Global.value
@@ -392,7 +397,8 @@ class MSSkipGram extends Serializable{
 
         val newSentenseIter = mutable.MutableList[Array[Int]]()
 
-        println(idx+" ~")
+        //println(idx+" ~")
+        println(" ~")
         while (iter.hasNext) {
           val sentence = iter.next()
 
@@ -476,6 +482,8 @@ class MSSkipGram extends Serializable{
         newSentenseIter.toIterator
       }.cache()
 
+      //sentenceSplit((k-1)%((1/sample).toInt)).count()
+
       tmpRDD.count()
       sentenceSplit((k-1)%(1/sample).toInt).unpersist()
       sentenceSplit((k-1)%(1/sample).toInt) = tmpRDD
@@ -489,10 +497,12 @@ class MSSkipGram extends Serializable{
       }
       bcSyn0Global.unpersist(false)
       bcSyn1Global.unpersist(false)
+      bcSeed.unpersist(false)
     }
 
     for (a<- 0 to sentenceSplit.size-1)
       sentenceSplit(a).unpersist()
+
 
 
     val wordArray = vocab.map(_.word)
@@ -734,6 +744,7 @@ class SkipGram extends Serializable {
     val table = sc.broadcast(makeTable())
 
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      println("!!!")
       new Iterator[Array[Int]] {
         def hasNext: Boolean = iter.hasNext
 
@@ -754,7 +765,11 @@ class SkipGram extends Serializable {
       }
     }
 
-    val newSentences = sentences.repartition(numPartitions).cache()
+
+    println(numPartitions)
+    val newSentences = sentences.coalesce(numPartitions).cache()
+
+    val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
 
     /*
     if (vocabSize.toLong * vectorSize * 8 >= Int.MaxValue) {
@@ -767,10 +782,6 @@ class SkipGram extends Serializable {
     println("Debug vocab size = " )
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
-
-    val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
-
-    newSentences.unpersist()
 
     for (k <- 1 to numIterations) {
 
@@ -798,9 +809,8 @@ class SkipGram extends Serializable {
       val syn0Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
       val syn1Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
 
-
-
       sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
+
 
         val syn0 = bcSyn0Global.value
         val syn1 = bcSyn1Global.value
@@ -856,8 +866,6 @@ class SkipGram extends Serializable {
       }
 
       //println(sentenceSplit((k-1)%((1/sample).toInt)).count())
-
-
       syn0Global = syn0Accum.value
       syn1Global = syn1Accum.value
 
@@ -865,9 +873,10 @@ class SkipGram extends Serializable {
         syn0Global(a) /= numPartitions
         syn1Global(a) /= numPartitions
       }
+
       bcSyn0Global.unpersist(false)
       bcSyn1Global.unpersist(false)
-
+      bcSeed.unpersist(false)
     }
 
     for (a<- 0 to sentenceSplit.size-1)
