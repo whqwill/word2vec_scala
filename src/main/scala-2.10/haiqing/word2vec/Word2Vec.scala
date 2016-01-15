@@ -29,7 +29,7 @@ case class VocabWord(
 
 object ArrayAccumulatorParam extends AccumulatorParam[Array[Float]] {
   def zero(initialValue: Array[Float]): Array[Float] = {
-    new Array[Float](initialValue.size)
+    initialValue
   }
   def addInPlace(v1: Array[Float], v2: Array[Float]): Array[Float] = {
     for(a<-0 to v1.size-1)
@@ -209,7 +209,7 @@ class MSSkipGram extends Serializable{
     var score = 0.0
     val w = sentence(posW)
     for (posU <- posW-window+1 to posW+window-1) {
-      if (posU >= 0 && posU < sentence.size && posW != posW) {
+      if (posU >= 0 && posU < sentence.size && posU != posW) {
         val u = sentence(posU)
         val l1 = u * vectorSize
         val l0 = w * vectorSize
@@ -340,11 +340,21 @@ class MSSkipGram extends Serializable{
     }*/
 
     val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
-
+    val initialValue0 = Array.fill(vocabSize * vectorSize * numSenses)(0.0f)
+    val initialValue1 = Array.fill(vocabSize * vectorSize * numSenses)(0.0f)
+    var syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
+    var syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
     var alpha = learningRate
+    var tmpRDD = sentenceSplit(0)
 
     for (k <- 1 to numIterations) {
       println("Iteration "+k)
+
+
+      if (k == 11) {
+        var iii = 0
+        iii = 1
+      }
 
       /*
       if (k > 0 && k % (numIterations*printRadio).toInt == 0) {
@@ -375,19 +385,16 @@ class MSSkipGram extends Serializable{
       println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
 
 
-      val syn0Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize * numSenses))(ArrayAccumulatorParam)
 
+      for(a<-0 to initialValue0.size-1) {initialValue0(a)=0.0f;initialValue1(a)=0.0f}
+      syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
+      syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
 
-      val syn1Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize * numSenses))(ArrayAccumulatorParam)
-
-
-      if (k == 11) {
-        var iii = 0
-        iii = 1
-      }
-
-      val tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
+      //val tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).map { sentence =>
+      tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
+        //sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
       //sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
+      //sentenceSplit((k-1)%((1/sample).toInt)) = sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
 
         //println(iter.size)
         val syn0 = bcSyn0Global.value
@@ -397,8 +404,9 @@ class MSSkipGram extends Serializable{
 
         val newSentenseIter = mutable.MutableList[Array[Int]]()
 
-        //println(idx+" ~")
-        println(" ~")
+        //d(idx+" ~")
+        println(idx+" ~")
+        var sumIter = 0
         while (iter.hasNext) {
           val sentence = iter.next()
 
@@ -472,29 +480,31 @@ class MSSkipGram extends Serializable{
             sIter += 1
           }
 
+          sumIter += sIter
+
           newSentenseIter+=sentence
         }
 
         syn0Accum += syn0
         syn1Accum += syn1
 
-
+        println(idx+"~"+newSentenseIter.size+"~"+sumIter)
         newSentenseIter.toIterator
-      }.cache()
+        //sentence
+      }.cache()//.count()
 
       //sentenceSplit((k-1)%((1/sample).toInt)).count()
 
-      tmpRDD.count()
+      println(tmpRDD.count())
       sentenceSplit((k-1)%(1/sample).toInt).unpersist()
       sentenceSplit((k-1)%(1/sample).toInt) = tmpRDD
 
-      syn0Global = syn0Accum.value
-      syn1Global = syn1Accum.value
 
       for (a <- 0 to syn0Global.size-1) {
-        syn0Global(a) /= numPartitions
-        syn1Global(a) /= numPartitions
+        syn0Global(a) = syn0Accum.value(a)/numPartitions
+        syn1Global(a) = syn1Accum.value(a)/numPartitions
       }
+
       bcSyn0Global.unpersist(false)
       bcSyn1Global.unpersist(false)
       bcSeed.unpersist(false)
@@ -502,8 +512,6 @@ class MSSkipGram extends Serializable{
 
     for (a<- 0 to sentenceSplit.size-1)
       sentenceSplit(a).unpersist()
-
-
 
     val wordArray = vocab.map(_.word)
     val msWordArray = new Array[String](wordArray.size*numSenses)
@@ -783,6 +791,11 @@ class SkipGram extends Serializable {
     syn0Global = Array.fill[Float](vocabSize * vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
     syn1Global = new Array[Float](vocabSize * vectorSize)
 
+    val initialValue0 = Array.fill(vocabSize * vectorSize)(0.0f)
+    val initialValue1 = Array.fill(vocabSize * vectorSize)(0.0f)
+    var syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
+    var syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
+
     for (k <- 1 to numIterations) {
 
       println("Iteration "+k)
@@ -796,6 +809,10 @@ class SkipGram extends Serializable {
         }
       }*/
 
+      for(a<-0 to initialValue0.size-1) {initialValue0(a)=0.0f;initialValue1(a)=0.0f}
+      syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
+      syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
+
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
       val bcSeed = sc.broadcast(k*seed)
@@ -806,8 +823,7 @@ class SkipGram extends Serializable {
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
       println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
 
-      val syn0Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
-      val syn1Accum = sc.accumulator(new Array[Float](vocabSize * vectorSize))(ArrayAccumulatorParam)
+
 
       sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
 
@@ -865,13 +881,9 @@ class SkipGram extends Serializable {
         syn1Accum += syn1
       }
 
-      //println(sentenceSplit((k-1)%((1/sample).toInt)).count())
-      syn0Global = syn0Accum.value
-      syn1Global = syn1Accum.value
-
       for (a <- 0 to syn0Global.size-1) {
-        syn0Global(a) /= numPartitions
-        syn1Global(a) /= numPartitions
+        syn0Global(a) = syn0Accum.value(a)/numPartitions
+        syn1Global(a) = syn1Accum.value(a)/numPartitions
       }
 
       bcSyn0Global.unpersist(false)
