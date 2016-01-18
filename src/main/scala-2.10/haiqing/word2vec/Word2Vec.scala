@@ -57,6 +57,7 @@ class MSSkipGram extends Serializable{
   private var testWord : String = null
   private var printRadio = 0.1
   private var saveRadio = 0.1
+  private var sentencePerIter = 2000
   def setPrintRadio(printRadio: Double): this.type = {
     this.printRadio = printRadio
     this
@@ -313,6 +314,7 @@ class MSSkipGram extends Serializable{
 
     //sentence need to be changed
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      println("!!")
       new Iterator[Array[Int]] {
         def hasNext: Boolean = iter.hasNext
         def next(): Array[Int] = {
@@ -339,7 +341,8 @@ class MSSkipGram extends Serializable{
         "which is " + vocabSize + "*" + vectorSize + " for now, less than `Int.MaxValue/8`.")
     }*/
 
-    val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/sentencePerIter
+    val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     val initialValue0 = Array.fill(vocabSize * vectorSize * numSenses)(0.0f)
     val initialValue1 = Array.fill(vocabSize * vectorSize * numSenses)(0.0f)
     var syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
@@ -347,7 +350,7 @@ class MSSkipGram extends Serializable{
     var alpha = learningRate
     var tmpRDD = sentenceSplit(0)
 
-    for (k <- 1 to numIterations) {
+    for (k <- 1 to numRDD*2) {
       println("Iteration "+k)
 
 
@@ -379,10 +382,10 @@ class MSSkipGram extends Serializable{
       val bcSeed = sc.broadcast(k*seed)
 
       alpha =
-        learningRate * (1 - (k-1)*1.0/numIterations)
+        learningRate * (1 - (k-1)*1.0/numRDD/2)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
+      println("wordCount = " + sample*(k-1)*sentencePerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
 
 
 
@@ -391,7 +394,7 @@ class MSSkipGram extends Serializable{
       syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
 
       //val tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).map { sentence =>
-      tmpRDD =sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
+      tmpRDD =sentenceSplit((k-1)%(numRDD)).mapPartitionsWithIndex { (idx,iter) =>
         //sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
       //sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
       //sentenceSplit((k-1)%((1/sample).toInt)) = sentenceSplit((k-1)%((1/sample).toInt)).mapPartitionsWithIndex { (idx,iter) =>
@@ -496,8 +499,8 @@ class MSSkipGram extends Serializable{
       //sentenceSplit((k-1)%((1/sample).toInt)).count()
 
       println(tmpRDD.count())
-      sentenceSplit((k-1)%(1/sample).toInt).unpersist()
-      sentenceSplit((k-1)%(1/sample).toInt) = tmpRDD
+      sentenceSplit((k-1)%(numRDD)).unpersist()
+      sentenceSplit((k-1)%(numRDD)) = tmpRDD
 
 
       for (a <- 0 to syn0Global.size-1) {
@@ -537,6 +540,7 @@ class SkipGram extends Serializable {
   private var testWord : String = null
   private var printRadio = 0.1
   private var saveRadio = 0.1
+  private var sentencePerIter = 200
   def setPrintRadio(printRadio: Double): this.type = {
     this.printRadio = printRadio
     this
@@ -776,8 +780,11 @@ class SkipGram extends Serializable {
 
     println(numPartitions)
     val newSentences = sentences.coalesce(numPartitions).cache()
+    println(newSentences.count())
 
-    val sentenceSplit = newSentences.randomSplit(new Array[Double]((1/sample).toInt).map(x=>x+1))
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/sentencePerIter
+
+    val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
 
     /*
     if (vocabSize.toLong * vectorSize * 8 >= Int.MaxValue) {
@@ -796,7 +803,7 @@ class SkipGram extends Serializable {
     var syn0Accum = sc.accumulator(initialValue0)(ArrayAccumulatorParam)
     var syn1Accum = sc.accumulator(initialValue1)(ArrayAccumulatorParam)
 
-    for (k <- 1 to numIterations) {
+    for (k <- 1 to numRDD*2) {
 
       println("Iteration "+k)
 
@@ -818,15 +825,17 @@ class SkipGram extends Serializable {
       val bcSeed = sc.broadcast(k*seed)
 
       alpha =
-        learningRate * (1 - (k-1)*1.0/numIterations)
+        learningRate * (1 - (k-1)*1.0/numRDD/2)
       //println("!!"+"numIterations"+numIterations+"numPartitions"+numPartitions+(trainWordsCount*k + numPartitions * wordCount.toDouble) / (trainWordsCount + 1) / numIterations)
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + sample*(k-1)*trainWordsCount + ", alpha = " + alpha)
+      println("wordCount = " + (k-1)*sentencePerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
 
 
 
-      sentenceSplit((k-1)%((1/sample).toInt)).foreachPartition { iter =>
-
+      println(numRDD)
+      println(sentenceSplit((k-1)%(numRDD)).count())
+      sentenceSplit((k-1)%(numRDD)).foreachPartition { iter =>
+        println(iter.size)
 
         val syn0 = bcSyn0Global.value
         val syn1 = bcSyn1Global.value
