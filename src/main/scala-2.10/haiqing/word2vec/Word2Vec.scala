@@ -777,7 +777,6 @@ class SkipGram extends Serializable {
       }
     }
 
-
     println(numPartitions)
     val newSentences = sentences.coalesce(numPartitions).cache()
     println(newSentences.count())

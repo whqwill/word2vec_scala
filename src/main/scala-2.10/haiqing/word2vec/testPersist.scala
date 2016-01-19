@@ -20,6 +20,8 @@ object testPersist {
     println(sc.defaultParallelism + "   " + sc.master)
 
 
+
+
     //var input = sc.textFile("news.2013.en.short.lemma",8).map(line => line.split(" ").toSeq).randomSplit(new Array[Double](10).map(x=>x+1))
 
     ///val initialValue = new Array[Float](1000000)
