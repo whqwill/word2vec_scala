@@ -28,12 +28,31 @@ object Main_new {
     println(words.count())
     println("total time:"+(currentTime-startTime)/1000.0)
 
-*/
+
     val model = Processing.loadModel(args(10))
-    val synonyms = model.findSynonyms("apple", 20)
+    val synonyms = model.findSynonyms("day", 20)
 
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")
     }
+    */
+
+
+    val bc = sc.broadcast(new Array[Float](10))
+    sc.parallelize(new Array[Float](1000)).mapPartitionsWithIndex { (idx,x)=>
+      val b = bc.value.clone()
+      println("idx="+idx+" before change, b(0)="+b(0))
+      //if (idx == 0)
+       // b(0) = 7
+
+
+      if (idx == 0)
+        b(0)  = 7
+      println("idx="+idx+" after change, bc.value(0)="+b(0))
+      x
+    }.count()
+
+
+
   }
 }

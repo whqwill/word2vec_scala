@@ -159,6 +159,7 @@ class Sence2Vec extends Serializable{
     for (posU <- posW-hyperPara.window+1 to posW+hyperPara.window-1) {
       if (posU >= 0 && posU < sentence.size && posU != posW) {
         val u = sentence(posU)
+
         score += math.log(activeFunction(syn0(w), syn1(u), hyperPara))
 
         for (d <- 0 to NEG.size-1) {
