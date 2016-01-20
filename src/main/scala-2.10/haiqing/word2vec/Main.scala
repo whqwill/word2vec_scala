@@ -97,19 +97,19 @@ object Processing {
     val wordIndex = collection.mutable.Map[String, Int]()
     for (line <- Source.fromFile(path+"/wordIndex.txt").getLines()) {
       val pair = line.split(" ")
-      wordIndex(pair(0))=pair(1).toInt
+      wordIndex.put(pair(1), pair(0).toInt)
     }
-    val wordVectors = Source.fromFile(path+"/wordVectors.txt").getLines().next().split(" ").map(s=>s.toFloat)
+    val wordVectors = Source.fromFile(path+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
 
   def loadTmpModel(path: String, k: Int): Word2VecModel = {
     val wordIndex = collection.mutable.Map[String, Int]()
-    for (line <- Source.fromFile(path+"/wordIndex"+k+".txt").getLines()) {
+    for (line <- Source.fromFile(path+"/wordIndex_"+k+".txt").getLines()) {
       val pair = line.split(" ")
-      wordIndex(pair(0))=pair(1).toInt
+      wordIndex.put(pair(1), pair(0).toInt)
     }
-    val wordVectors = Source.fromFile(path+"/wordVectors"+k+".txt").getLines().next().split(" ").map(s=>s.toFloat)
+    val wordVectors = Source.fromFile(path+"/syn0_"+k+".txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
 }

@@ -974,6 +974,7 @@ class Word2VecModel (
       cosVec(ind) /= wordVecNorms(ind)
       ind += 1
     }
+
     wordList.zip(cosVec)
       .toSeq
       .sortBy(- _._2)
