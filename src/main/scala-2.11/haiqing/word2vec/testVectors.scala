@@ -5,10 +5,10 @@ package haiqing.word2vec
  */
 object testVectors {
   def main(args: Array[String]): Unit = {
-    val model = Processing.loadModel("./")
+    val model = Processing.loadModel(args(0))
     //val model = Processing.loadTmpModel("./data_new",2000)
 
-    val synonyms = model.findSynonyms("day", 20)
+    val synonyms = model.findSynonyms(args(1), 20)
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {
@@ -17,7 +17,7 @@ object testVectors {
 
     println()
     println()
-    val NEWsynonyms = model.findSynonyms("bank", 20)
+    val NEWsynonyms = model.findSynonyms(args(2), 20)
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- NEWsynonyms) {

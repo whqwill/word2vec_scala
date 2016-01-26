@@ -23,14 +23,19 @@ object Main_new {
 
     println(words.take(100).reduce((a,b)=>a+" "+b))
 
-    val sen2Vec = new Sence2Vec().setNumPartitions(args(1).toInt).setNumSentencesPerIter(args(2).toInt).setNumIterations(args(3).toInt).setLearningRate(args(4).toFloat).setNegative(args(5).toInt).setWindow(args(6).toInt).setMinCount(args(7).toInt).setSeed(args(8).toLong).setVectorSize(args(9).toInt)
-    sen2Vec.trainSkipGramLocal(words, args(10))
+    val sen2Vec = new Sence2Vec().setNumPartitions(args(1).toInt).setNumSentencesPerIter(args(2).toInt).setNumIterations(args(3).toInt).setLearningRate(args(4).toFloat).setNegative(args(5).toInt).setWindow(args(6).toInt).setMinCount(args(7).toInt).setSeed(args(8).toLong).setVectorSize(args(9).toInt).setMAX_SENTENCE_LENGTH(args(10).toInt)
+
+    if (args.length > 13 && args(13).toLowerCase == "local")
+      sen2Vec.trainSkipGramLocal(words, args(11))
+    else if (args.length > 13 && args(13).toLowerCase == "gradient")
+      sen2Vec.trainSkipGramGradient(words, args(11))
+    else
+      sen2Vec.trainSkipGram(words, args(11))
     println(words.count())
     println("total time:"+(currentTime-startTime)/1000.0)
 
-
-    val model = Processing.loadModel(args(10))
-    val synonyms = model.findSynonyms(args(11), 20)
+    val model = Processing.loadModel(args(11))
+    val synonyms = model.findSynonyms(args(12), 20)
 
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")

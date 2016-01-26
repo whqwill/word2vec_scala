@@ -12,6 +12,8 @@ import scala.collection.mutable.ArrayBuilder
 import com.github.fommil.netlib.BLAS.{getInstance => blas}
 import org.apache.spark.mllib.linalg.{Vector, Vectors, DenseMatrix, BLAS, DenseVector}
 
+import scala.io.Source
+
 /**
  * Created by hwang on 19.01.16.
  */
@@ -27,6 +29,7 @@ class Sence2Vec extends Serializable{
   private var window = 5
   private var sentenceIter = 5
   private var numSentencesPerIter = 200
+  private var MAX_SENTENCE_LENGTH = 1000
   def setVectorSize(vectorSize: Int): this.type = {
     this.vectorSize = vectorSize
     this
@@ -72,10 +75,13 @@ class Sence2Vec extends Serializable{
     this.numSentencesPerIter = numSentencesPerIter
     this
   }
+  def setMAX_SENTENCE_LENGTH(MAX_SENTENCE_LENGTH: Int): this.type = {
+    this.MAX_SENTENCE_LENGTH = MAX_SENTENCE_LENGTH
+    this
+  }
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
-  private val MAX_SENTENCE_LENGTH = 1000
   private val POWER = 0.75
   private val VARIANCE = 0.01f
   private val TABEL_SIZE = 10000
@@ -153,24 +159,6 @@ class Sence2Vec extends Serializable{
     f
   }
 
-  private def getScore(syn0 : Array[Array[Float]], syn1 : Array[Array[Float]], NEG: Array[Int], posW: Int, sentence: Array[Int], hyperPara: HyperPara): Double = {
-    var score = 0.0
-    val w = sentence(posW)
-    for (posU <- posW-hyperPara.window+1 to posW+hyperPara.window-1) {
-      if (posU >= 0 && posU < sentence.size && posU != posW) {
-        val u = sentence(posU)
-
-        score += math.log(activeFunction(syn0(w), syn1(u), hyperPara))
-
-        for (d <- 0 to NEG.size-1) {
-          val Z = NEG(d)
-          score += math.log(1-activeFunction(syn0(Z), syn1(u), hyperPara))
-        }
-      }
-    }
-    score
-  }
-
   private def getGradientU(synHash: mutable.HashMap[Int,Array[Float]], w: Int, u: Int, NEG: Array[Int], hyperPara: HyperPara): Array[Float] = {
     val Delta = new Array[Float](hyperPara.vectorSize)
 
@@ -205,13 +193,13 @@ class Sence2Vec extends Serializable{
     Delta
   }
 
-  case class HyperPara( seed: Long, EXP_TABLE_SIZE : Int, MAX_EXP : Int, TABEL_SIZE: Int, vocabSize: Int, vectorSize : Int, window: Int, negative: Int, expTable: Array[Float], table: Array[Int])
+  case class HyperPara( seed: Long, MAX_SENTENCE_LENGTH: Int, EXP_TABLE_SIZE : Int, MAX_EXP : Int, TABEL_SIZE: Int, vocabSize: Int, vectorSize : Int, window: Int, negative: Int, numSenses: Int, sentenceIter: Int, expTable: Array[Float], table: Array[Int])
 
   def trainSkipGram(words: RDD[String], outputPath: String): Unit = {
     val sc = words.context
     learnVocab(words)
     val bcVocabHash = sc.broadcast(vocabHash)
-    val bcHyperPara = sc.broadcast(HyperPara(seed, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, createExpTable(), makeTable()))
+    val bcHyperPara = sc.broadcast(HyperPara(seed, MAX_SENTENCE_LENGTH, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, numSenses, sentenceIter, createExpTable(), makeTable()))
 
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -219,7 +207,7 @@ class Sence2Vec extends Serializable{
         def next(): Array[Int] = {
           val sentence = ArrayBuilder.make[Int]
           var sentenceLength = 0
-          while (iter.hasNext && sentenceLength < MAX_SENTENCE_LENGTH) {
+          while (iter.hasNext && sentenceLength < bcHyperPara.value.MAX_SENTENCE_LENGTH) {
             val word = bcVocabHash.value.get(iter.next())
             if (word.nonEmpty) {
               sentence += word.get
@@ -359,6 +347,176 @@ class Sence2Vec extends Serializable{
     writeToFile(outputPath, syn0Global, syn1Global)
   }
 
+  def trainSkipGramGradient(words: RDD[String], outputPath: String): Unit = {
+    val sc = words.context
+    learnVocab(words)
+    val bcVocabHash = sc.broadcast(vocabHash)
+    val bcHyperPara = sc.broadcast(HyperPara(seed, MAX_SENTENCE_LENGTH, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, numSenses, sentenceIter, createExpTable(), makeTable()))
+
+    val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      new Iterator[Array[Int]] {
+        def hasNext: Boolean = iter.hasNext
+        def next(): Array[Int] = {
+          val sentence = ArrayBuilder.make[Int]
+          var sentenceLength = 0
+          while (iter.hasNext && sentenceLength < bcHyperPara.value.MAX_SENTENCE_LENGTH) {
+            val word = bcVocabHash.value.get(iter.next())
+            if (word.nonEmpty) {
+              sentence += word.get
+              sentenceLength += 1
+            }
+          }
+          sentence.result()
+        }
+      }
+    }
+
+    val newSentences = sentences.repartition(numPartitions).cache()
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
+    var alpha = learningRate
+    val syn0Global = new Array[Array[Float]](vocabSize)
+    val syn1Global = new Array[Array[Float]](vocabSize)
+    for (a <- 0 to vocabSize-1) {
+      syn0Global(a) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
+      syn1Global(a) = new Array[Float](vectorSize)
+    }
+
+
+    println("numRDD="+numRDD)
+    println()
+
+    for (k <- 1 to numRDD*numIterations) {
+      println("Iteration "+k)
+
+      val bcSyn0Global = sc.broadcast(syn0Global)
+      val bcSyn1Global = sc.broadcast(syn1Global)
+      val index = (k-1)%(numRDD)
+
+      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
+      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+
+      println("index = "+index)
+      val tmpRDD = sentenceSplit(index).mapPartitionsWithIndex { (idx,iter) =>
+
+        //println("idx="+idx+" iter.size="+iter.size)
+
+        util.Random.setSeed(bcHyperPara.value.seed*k+idx)
+        //val newIter = mutable.MutableList[(Int,Array[Float])]()
+        val synHash = new mutable.HashMap[Int,(Array[Float],Int)]
+
+        val hyperPara = bcHyperPara.value
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+
+        while (iter.hasNext) {
+
+          val sentence = iter.next()
+
+          for (posW <- 0 to sentence.size-1) {
+
+            val w = sentence(posW)
+
+            val NEG = new Array[Int](bcHyperPara.value.negative)
+            for (i <- 0 to bcHyperPara.value.negative - 1) {
+              NEG(i) = bcHyperPara.value.table(Math.abs(util.Random.nextLong() % bcHyperPara.value.TABEL_SIZE).toInt)
+              if (NEG(i) <= 0)
+                NEG(i) = (Math.abs(util.Random.nextLong()) % (bcHyperPara.value.vocabSize - 1) + 1).toInt
+            }
+
+            for (posU <- posW-bcHyperPara.value.window+1 to posW+bcHyperPara.value.window-1)
+              if (posU >= 0 && posU < sentence.size && posU != posW) {
+                val u = sentence(posU)
+
+
+
+                val deltaU = getGradientULocal(syn0,syn1,w,u,NEG,hyperPara)
+
+
+                val v1Option = synHash.get(u+hyperPara.vocabSize)
+                var v1 : Array[Float] = null
+                var num = 0
+                if (v1Option.isEmpty)
+                  v1 = new Array[Float](hyperPara.vectorSize)
+                else {
+                  v1 = v1Option.get._1
+                  num = v1Option.get._2
+                }
+                blas.saxpy(hyperPara.vectorSize, 1.0f, deltaU, 1, v1, 1)
+                synHash.put(u+hyperPara.vocabSize, (v1,num+1))
+              }
+
+            var Z = w
+            var label = 1
+            for (d <- -1 to NEG.size-1) {
+              if (d >= 0) {
+                Z = NEG(d)
+                label = 0
+              }
+
+              val deltaZ = getGradientZLocal(syn0,syn1,posW,Z,label,sentence,hyperPara)
+
+              val v0Option = synHash.get(Z)
+              var v0 : Array[Float] = null
+              var num = 0
+              if (v0Option.isEmpty)
+                v0 = new Array[Float](hyperPara.vectorSize)
+              else {
+                v0 = v0Option.get._1
+                num = v0Option.get._2
+              }
+              blas.saxpy(hyperPara.vectorSize, 1.0f, deltaZ, 1, v0, 1)
+              synHash.put(Z, (v0,num+1))
+            }
+          }
+        }
+        println("idx="+idx+" synHash.size="+synHash.size)
+        synHash.toIterator
+        //println(newIter.size)
+        //newIter.toIterator
+      }.cache()
+
+      val updateSyn = tmpRDD.reduceByKey{(v1,v2)=>for(a<-0 to v1._1.size-1)v1._1(a) += v2._1(a);(v1._1,v1._2+v2._2)}.collect()
+
+      bcSyn0Global.unpersist()
+      bcSyn1Global.unpersist()
+
+      for (a<-0 to updateSyn.size-1) {
+        val index = updateSyn(a)._1
+        if (index == 10)
+          println("index=10 count="+updateSyn(a)._2._2)
+        if (index < vocabSize)
+          blas.saxpy(vectorSize, alpha.toFloat / updateSyn(a)._2._2, updateSyn(a)._2._1, 1, syn0Global(index), 1)
+        else
+          blas.saxpy(vectorSize, alpha.toFloat / updateSyn(a)._2._2, updateSyn(a)._2._1, 1, syn1Global(index - vocabSize), 1)
+      }
+
+      println(syn0Global(0)(0))
+
+    }
+
+    writeToFile(outputPath, syn0Global, syn1Global)
+  }
+
+  private def getScore(syn0 : Array[Array[Float]], syn1 : Array[Array[Float]], NEG: Array[Int], posW: Int, sentence: Array[Int], hyperPara: HyperPara): Double = {
+    var score = 0.0
+    val w = sentence(posW)
+    for (posU <- posW-hyperPara.window+1 to posW+hyperPara.window-1) {
+      if (posU >= 0 && posU < sentence.size && posU != posW) {
+        val u = sentence(posU)
+
+        score += math.log(activeFunction(syn0(w), syn1(u), hyperPara))
+
+        for (d <- 0 to NEG.size-1) {
+          val Z = NEG(d)
+          score += math.log(1-activeFunction(syn0(Z), syn1(u), hyperPara))
+        }
+      }
+    }
+    score
+  }
+
   private def getGradientULocal(syn0: Array[Array[Float]], syn1: Array[Array[Float]], w: Int, u: Int, NEG: Array[Int], hyperPara: HyperPara): Array[Float] = {
     val Delta = new Array[Float](hyperPara.vectorSize)
 
@@ -397,7 +555,7 @@ class Sence2Vec extends Serializable{
     val sc = words.context
     learnVocab(words)
     val bcVocabHash = sc.broadcast(vocabHash)
-    val bcHyperPara = sc.broadcast(HyperPara(seed, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, createExpTable(), makeTable()))
+    val bcHyperPara = sc.broadcast(HyperPara(seed, MAX_SENTENCE_LENGTH, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, numSenses, sentenceIter, createExpTable(), makeTable()))
 
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -405,7 +563,7 @@ class Sence2Vec extends Serializable{
         def next(): Array[Int] = {
           val sentence = ArrayBuilder.make[Int]
           var sentenceLength = 0
-          while (iter.hasNext && sentenceLength < MAX_SENTENCE_LENGTH) {
+          while (iter.hasNext && sentenceLength < bcHyperPara.value.MAX_SENTENCE_LENGTH) {
             val word = bcVocabHash.value.get(iter.next())
             if (word.nonEmpty) {
               sentence += word.get
@@ -444,13 +602,13 @@ class Sence2Vec extends Serializable{
       println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
 
       println("index = "+index)
-      sentenceSplit(index).foreachPartition { iter =>
 
+      //newSentences.sample(false, 1.0/numRDD).foreachPartition { iter =>
+      sentenceSplit(index).foreachPartition { iter =>
 
         val hyperPara = bcHyperPara.value
         val syn0 = bcSyn0Global.value
         val syn1 = bcSyn1Global.value
-
 
         while (iter.hasNext) {
 
@@ -492,6 +650,138 @@ class Sence2Vec extends Serializable{
           }
         }
       }
+
+      println(syn0Global(0)(0))
+
+    }
+
+    writeToFile(outputPath, syn0Global, syn1Global)
+  }
+
+  def trainMSSkipGramLocal(words: RDD[String], synPath:String, outputPath: String): Unit = {
+
+    val sc = words.context
+    learnVocab(words)
+    val bcVocabHash = sc.broadcast(vocabHash)
+    val bcHyperPara = sc.broadcast(HyperPara(seed, MAX_SENTENCE_LENGTH, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, numSenses, sentenceIter, createExpTable(), makeTable()))
+
+    val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      new Iterator[Array[Int]] {
+        def hasNext: Boolean = iter.hasNext
+        def next(): Array[Int] = {
+          val sentence = ArrayBuilder.make[Int]
+          var sentenceLength = 0
+          while (iter.hasNext && sentenceLength < bcHyperPara.value.MAX_SENTENCE_LENGTH) {
+            val word = bcVocabHash.value.get(iter.next())
+            if (word.nonEmpty) {
+              sentence += word.get + bcHyperPara.value.vocabSize * util.Random.nextInt(bcHyperPara.value.numSenses)
+              sentenceLength += 1
+            }
+          }
+          sentence.result()
+        }
+      }
+    }
+
+    val newSentences = sentences.repartition(numPartitions).cache()
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
+    var alpha = learningRate
+
+    val syn0Single = Source.fromFile(synPath+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
+    val syn1Single = Source.fromFile(synPath+"/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
+    val syn0Global = new Array[Array[Float]](vocabSize*numSenses)
+    val syn1Global = new Array[Array[Float]](vocabSize*numSenses)
+    for (w <- 0 to vocabSize-1) {
+
+      for (s <- 0 to numSenses - 1) {
+        syn0Global(w+vocabSize*s) = new Array[Float](vectorSize)
+        syn1Global(w+vocabSize*s) = new Array[Float](vectorSize)
+
+        for (i <- 0 to vectorSize-1) {
+          syn0Global(w+vocabSize*s)(i) = syn0Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn1Global(w+vocabSize*s)(i) = syn1Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+        }
+      }
+    }
+
+    val bcSyn0Global = sc.broadcast(syn0Global)
+    val bcSyn1Global = sc.broadcast(syn1Global)
+
+    println("numRDD="+numRDD)
+    println()
+
+    for (k <- 1 to numRDD*numIterations) {
+      println("Iteration "+k)
+
+      val index = (k-1)%(numRDD)
+
+      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
+      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+
+      println("index = "+index)
+
+      //newSentences.sample(false, 1.0/numRDD).foreachPartition { iter =>
+      val tmpRDD = sentenceSplit(index).mapPartitions { iter =>
+
+        var sumIter = 0
+        val hyperPara = bcHyperPara.value
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+
+        val newIter = mutable.MutableList[Array[Int]]()
+
+        while (iter.hasNext) {
+
+          val sentence = iter.next()
+
+          var flag = false
+
+          var sIter = 1
+
+          //println(idx+"!!2")
+          while (sIter <= hyperPara.sentenceIter && (sIter == 1 || flag)) {
+
+            for (posW <- 0 to sentence.size - 1) {
+
+              val w = sentence(posW)
+
+              val NEG = new Array[Int](bcHyperPara.value.negative)
+              for (i <- 0 to bcHyperPara.value.negative - 1) {
+                NEG(i) = bcHyperPara.value.table(Math.abs(util.Random.nextLong() % bcHyperPara.value.TABEL_SIZE).toInt)
+                if (NEG(i) <= 0)
+                  NEG(i) = (Math.abs(util.Random.nextLong()) % (bcHyperPara.value.vocabSize - 1) + 1).toInt
+              }
+
+              for (posU <- posW - bcHyperPara.value.window + 1 to posW + bcHyperPara.value.window - 1)
+                if (posU >= 0 && posU < sentence.size && posU != posW) {
+                  val u = sentence(posU)
+
+                  val deltaU = getGradientULocal(syn0, syn1, w, u, NEG, hyperPara)
+
+                  blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaU, 1, syn1(u), 1)
+                }
+
+              var Z = w
+              var label = 1
+              for (d <- -1 to NEG.size - 1) {
+                if (d >= 0) {
+                  Z = NEG(d)
+                  label = 0
+                }
+
+                val deltaZ = getGradientZLocal(syn0, syn1, posW, Z, label, sentence, hyperPara)
+
+                blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaZ, 1, syn0(Z), 1)
+
+              }
+            }
+          }
+          newIter+=sentence
+        }
+        newIter.toIterator
+      }.cache()
 
       println(syn0Global(0)(0))
 
