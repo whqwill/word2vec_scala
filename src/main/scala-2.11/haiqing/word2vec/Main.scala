@@ -102,6 +102,15 @@ object Processing {
     val wordVectors = Source.fromFile(path+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
+  def loadModelSenses(path: String): Word2VecModel = {
+    val wordIndex = collection.mutable.Map[String, Int]()
+    for (line <- Source.fromFile(path+"/wordIndexSenses.txt").getLines()) {
+      val pair = line.split(" ")
+      wordIndex.put(pair(1), pair(0).toInt)
+    }
+    val wordVectors = Source.fromFile(path+"/syn0Senses.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
+    new Word2VecModel(wordIndex.toMap, wordVectors)
+  }
   def loadTmpModel(path: String, k: Int): Word2VecModel = {
     val wordIndex = collection.mutable.Map[String, Int]()
     for (line <- Source.fromFile(path+"/wordIndex_"+k+".txt").getLines()) {
