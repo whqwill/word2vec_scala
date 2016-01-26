@@ -141,7 +141,7 @@ class Sence2Vec extends Serializable{
   }
 
   private def activeFunction(v0 :Array[Float], v1 :Array[Float], hyperPara: HyperPara): Double = {
-    var f = blas.sdot(hyperPara.vectorSize, v0, 0, 1, v1, 0, 1)
+    var f = blas.sdot(hyperPara.vectorSize, v0, 1, v1, 1)
     if (f > hyperPara.MAX_EXP)
       f = hyperPara.expTable(hyperPara.expTable.length - 1)
     else if (f < -hyperPara.MAX_EXP)
@@ -171,9 +171,8 @@ class Sence2Vec extends Serializable{
     score
   }
 
-  private def getGradientU(syn0 : Array[Array[Float]], syn1 : Array[Array[Float]], w: Int, u: Int, NEG: Array[Int], hyperPara: HyperPara): (Array[Float], Int) = {
+  private def getGradientU(synHash: mutable.HashMap[Int,Array[Float]], w: Int, u: Int, NEG: Array[Int], hyperPara: HyperPara): Array[Float] = {
     val Delta = new Array[Float](hyperPara.vectorSize)
-    var num = 0
 
     var Z = w
     var label = 1
@@ -184,28 +183,26 @@ class Sence2Vec extends Serializable{
         label = 0
       }
 
-      val g = (label-activeFunction(syn0(Z), syn1(u), hyperPara)).toFloat
+      val g = (label-activeFunction(synHash.get(Z).get, synHash.get(u+hyperPara.vocabSize).get, hyperPara)).toFloat
 
-      blas.saxpy(hyperPara.vectorSize, g, syn0(Z), 0, 1, Delta, 0, 1)
+      blas.saxpy(hyperPara.vectorSize, g, synHash.get(Z).get, 1, Delta, 1)
 
-      num += 1
     }
-    (Delta, num)
+    Delta
   }
 
-  private def getGradientZ(syn0 : Array[Array[Float]], syn1 : Array[Array[Float]],  posW: Int, Z: Int, label: Int, sentence: Array[Int], hyperPara: HyperPara): (Array[Float],Int) = {
+  private def getGradientZ(synHash: mutable.HashMap[Int,Array[Float]],  posW: Int, Z: Int, label: Int, sentence: Array[Int], hyperPara: HyperPara): Array[Float] = {
     val Delta = new Array[Float](hyperPara.vectorSize)
-    var num = 0
+
     for (posU <- posW-hyperPara.window+1 to posW+hyperPara.window-1) {
       if (posU >= 0 && posU < sentence.size && posU != posW) {
         val u = sentence(posU)
-        val g = (label-activeFunction(syn0(Z), syn1(u), hyperPara)).toFloat
+        val g = (label-activeFunction(synHash.get(Z).get, synHash.get(u+hyperPara.vocabSize).get, hyperPara)).toFloat
 
-        blas.saxpy(hyperPara.vectorSize, g, syn1(u), 0, 1, Delta, 0, 1)
-        num += 1
+        blas.saxpy(hyperPara.vectorSize, g, synHash.get(u+hyperPara.vocabSize).get, 1, Delta, 1)
       }
     }
-    (Delta, num)
+    Delta
   }
 
   case class HyperPara( seed: Long, EXP_TABLE_SIZE : Int, MAX_EXP : Int, TABEL_SIZE: Int, vocabSize: Int, vectorSize : Int, window: Int, negative: Int, expTable: Array[Float], table: Array[Int])
@@ -245,6 +242,10 @@ class Sence2Vec extends Serializable{
       syn1Global(a) = new Array[Float](vectorSize)
     }
 
+
+    println("numRDD="+numRDD)
+    println()
+
     for (k <- 1 to numRDD*numIterations) {
       println("Iteration "+k)
 
@@ -263,7 +264,11 @@ class Sence2Vec extends Serializable{
 
         util.Random.setSeed(bcHyperPara.value.seed*k+idx)
         //val newIter = mutable.MutableList[(Int,Array[Float])]()
-        val synHash = new mutable.HashMap[Int,(Array[Float],Int)]
+        val synHash = new mutable.HashMap[Int,Array[Float]]
+
+        val hyperPara = bcHyperPara.value
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
 
         while (iter.hasNext) {
 
@@ -272,6 +277,189 @@ class Sence2Vec extends Serializable{
           for (posW <- 0 to sentence.size-1) {
 
             val w = sentence(posW)
+            if (synHash.get(w).isEmpty)
+              synHash.put(w, syn0(w).clone())
+
+            val NEG = new Array[Int](bcHyperPara.value.negative)
+            for (i <- 0 to bcHyperPara.value.negative - 1) {
+              NEG(i) = bcHyperPara.value.table(Math.abs(util.Random.nextLong() % bcHyperPara.value.TABEL_SIZE).toInt)
+              if (NEG(i) <= 0)
+                NEG(i) = (Math.abs(util.Random.nextLong()) % (bcHyperPara.value.vocabSize - 1) + 1).toInt
+
+              val Z = NEG(i)
+              if (synHash.get(Z).isEmpty)
+                synHash.put(Z, syn0(Z).clone())
+            }
+
+            for (posU <- posW-bcHyperPara.value.window+1 to posW+bcHyperPara.value.window-1)
+              if (posU >= 0 && posU < sentence.size && posU != posW) {
+                val u = sentence(posU)
+
+                if (synHash.get(u+hyperPara.vocabSize).isEmpty)
+                  synHash.put(u+hyperPara.vocabSize, syn1(u).clone())
+
+                val deltaU = getGradientU(synHash,w,u,NEG,hyperPara)
+
+                val v1 = synHash.get(u+hyperPara.vocabSize).get
+                blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaU, 1, v1, 1)
+              }
+
+            var Z = w
+            var label = 1
+            for (d <- -1 to NEG.size-1) {
+              if (d >= 0) {
+                Z = NEG(d)
+                label = 0
+              }
+
+              val deltaZ = getGradientZ(synHash,posW,Z,label,sentence,hyperPara)
+
+              val v0 = synHash.get(Z).get
+              blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaZ, 1, v0, 1)
+
+            }
+          }
+        }
+        println("idx="+idx+" synHash.size="+synHash.size)
+        synHash.toIterator
+        //println(newIter.size)
+        //newIter.toIterator
+      }.cache()
+
+      val updateSyn = tmpRDD.reduceByKey{(v1,v2)=>for(a<-0 to v1.size-1)v1(a) += v2(a);v1}.collect()
+      val countSyn = tmpRDD.countByKey()
+
+      bcSyn0Global.unpersist()
+      bcSyn1Global.unpersist()
+
+      for (a<-0 to updateSyn.size-1) {
+        val index = updateSyn(a)._1
+        if (index == 10)
+          println("index=10 "+countSyn(index))
+        if (index < vocabSize) {
+          for (i <- 0 to vectorSize-1)
+            syn0Global(index)(i) = 0.0f
+
+          blas.saxpy(vectorSize, 1.0f / countSyn(index), updateSyn(a)._2, 1, syn0Global(index), 1)
+          //blas.saxpy(vectorSize, alpha.toFloat / countSyn.get(index).get, updateSyn(a)._2, 0, 1, syn0Global(index), 0, 1)
+        }
+        else {
+          for (i <- 0 to vectorSize-1)
+            syn1Global(index - vocabSize)(i) = 0.0f
+
+          blas.saxpy(vectorSize, 1.0f / countSyn(index), updateSyn(a)._2, 1, syn1Global(index - vocabSize), 1)
+          //blas.saxpy(vectorSize, alpha.toFloat / countSyn.get(index).get, updateSyn(a)._2, 0, 1, syn1Global(index-vocabSize), 0, 1)
+        }
+      }
+
+      println(syn0Global(0)(0))
+
+    }
+
+    writeToFile(outputPath, syn0Global, syn1Global)
+  }
+
+  private def getGradientULocal(syn0: Array[Array[Float]], syn1: Array[Array[Float]], w: Int, u: Int, NEG: Array[Int], hyperPara: HyperPara): Array[Float] = {
+    val Delta = new Array[Float](hyperPara.vectorSize)
+
+    var Z = w
+    var label = 1
+
+    for (d <- -1 to NEG.size-1) {
+      if (d >= 0) {
+        Z = NEG(d)
+        label = 0
+      }
+
+      val g = (label-activeFunction(syn0(Z), syn1(u), hyperPara)).toFloat
+
+      blas.saxpy(hyperPara.vectorSize, g, syn0(Z), 1, Delta, 1)
+
+    }
+    Delta
+  }
+
+  private def getGradientZLocal(syn0: Array[Array[Float]], syn1: Array[Array[Float]],  posW: Int, Z: Int, label: Int, sentence: Array[Int], hyperPara: HyperPara): Array[Float] = {
+    val Delta = new Array[Float](hyperPara.vectorSize)
+
+    for (posU <- posW-hyperPara.window+1 to posW+hyperPara.window-1) {
+      if (posU >= 0 && posU < sentence.size && posU != posW) {
+        val u = sentence(posU)
+        val g = (label-activeFunction(syn0(Z), syn1(u), hyperPara)).toFloat
+
+        blas.saxpy(hyperPara.vectorSize, g, syn1(u), 1, Delta, 1)
+      }
+    }
+    Delta
+  }
+
+  def trainSkipGramLocal(words: RDD[String], outputPath: String): Unit = {
+    val sc = words.context
+    learnVocab(words)
+    val bcVocabHash = sc.broadcast(vocabHash)
+    val bcHyperPara = sc.broadcast(HyperPara(seed, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, createExpTable(), makeTable()))
+
+    val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
+      new Iterator[Array[Int]] {
+        def hasNext: Boolean = iter.hasNext
+        def next(): Array[Int] = {
+          val sentence = ArrayBuilder.make[Int]
+          var sentenceLength = 0
+          while (iter.hasNext && sentenceLength < MAX_SENTENCE_LENGTH) {
+            val word = bcVocabHash.value.get(iter.next())
+            if (word.nonEmpty) {
+              sentence += word.get
+              sentenceLength += 1
+            }
+          }
+          sentence.result()
+        }
+      }
+    }
+
+    val newSentences = sentences.repartition(numPartitions).cache()
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
+    var alpha = learningRate
+    val syn0Global = new Array[Array[Float]](vocabSize)
+    val syn1Global = new Array[Array[Float]](vocabSize)
+    for (a <- 0 to vocabSize-1) {
+      syn0Global(a) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
+      syn1Global(a) = new Array[Float](vectorSize)
+    }
+
+    val bcSyn0Global = sc.broadcast(syn0Global)
+    val bcSyn1Global = sc.broadcast(syn1Global)
+
+    println("numRDD="+numRDD)
+    println()
+
+    for (k <- 1 to numRDD*numIterations) {
+      println("Iteration "+k)
+
+      val index = (k-1)%(numRDD)
+
+      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
+      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+
+      println("index = "+index)
+      sentenceSplit(index).foreachPartition { iter =>
+
+
+        val hyperPara = bcHyperPara.value
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+
+
+        while (iter.hasNext) {
+
+          val sentence = iter.next()
+
+          for (posW <- 0 to sentence.size-1) {
+
+            val w = sentence(posW)
+
             val NEG = new Array[Int](bcHyperPara.value.negative)
             for (i <- 0 to bcHyperPara.value.negative - 1) {
               NEG(i) = bcHyperPara.value.table(Math.abs(util.Random.nextLong() % bcHyperPara.value.TABEL_SIZE).toInt)
@@ -283,23 +471,9 @@ class Sence2Vec extends Serializable{
               if (posU >= 0 && posU < sentence.size && posU != posW) {
                 val u = sentence(posU)
 
-                val delta = getGradientU(bcSyn0Global.value,bcSyn1Global.value,w,u,NEG,bcHyperPara.value)
-                val deltaU = delta._1
-                val deltaNum = delta._2
+                val deltaU = getGradientULocal(syn0,syn1,w,u,NEG,hyperPara)
 
-                //newIter.+=:(u+bcHyperPara.value.vocabSize,deltaU)
-
-                val v1Option = synHash.get(u+bcHyperPara.value.vocabSize)
-                var v1: Array[Float] = null
-                var num = 0
-                if (v1Option.isEmpty)
-                  v1 = bcSyn1Global.value(u)
-                else {
-                  v1 = v1Option.get._1
-                  num = v1Option.get._2
-                }
-                blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaU, 0, 1, v1, 0, 1)
-                synHash.put(u+bcHyperPara.value.vocabSize, (v1,num+deltaNum))
+                blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaU, 1, syn1(u), 1)
               }
 
             var Z = w
@@ -310,51 +484,23 @@ class Sence2Vec extends Serializable{
                 label = 0
               }
 
-              val delta = getGradientZ(bcSyn0Global.value,bcSyn1Global.value,posW,Z,label,sentence,bcHyperPara.value)
-              val deltaZ = delta._1
-              val num = delta._2
+              val deltaZ = getGradientZLocal(syn0,syn1,posW,Z,label,sentence,hyperPara)
 
-              //newIter.+=:(Z,deltaZ)
-              val v0Option = synHash.get(Z)
-              var v0: Array[Float] = null
-              var oldNum = 0
-              if (v0Option.isEmpty)
-                v0 = bcSyn0Global.value(Z)
-              else {
-                v0 = v0Option.get._1
-                oldNum = v0Option.get._2
-              }
+              blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaZ, 1, syn0(Z), 1)
 
-              blas.saxpy(bcHyperPara.value.vectorSize, alpha.toFloat, deltaZ, 0, 1, v0, 0, 1)
-              synHash.put(Z,(v0,oldNum+num))
             }
           }
         }
-        println("idx="+idx+" synHash.size="+synHash.size)
-        synHash.toIterator
-        //println(newIter.size)
-        //newIter.toIterator
-      }.cache()
-
-      val updateSyn = tmpRDD.reduceByKey{(v1,v2)=>for(a<-0 to v1._1.size-1)v1._1(a) += v2._1(a);(v1._1,v1._2+v2._2)}.collect()
-
-      bcSyn0Global.unpersist()
-      bcSyn1Global.unpersist()
-
-      for (a<-0 to updateSyn.size-1) {
-        val index = updateSyn(a)._1
-        if (index < vocabSize)
-          blas.saxpy(vectorSize, 1.0f / updateSyn(a)._2._2 , updateSyn(a)._2._1, 0, 1, syn0Global(index), 0, 1)
-          //blas.saxpy(vectorSize, alpha.toFloat / countSyn.get(index).get, updateSyn(a)._2, 0, 1, syn0Global(index), 0, 1)
-        else
-          blas.saxpy(vectorSize, 1.0f / updateSyn(a)._2._2, updateSyn(a)._2._1, 0, 1, syn1Global(index-vocabSize), 0, 1)
-          //blas.saxpy(vectorSize, alpha.toFloat / countSyn.get(index).get, updateSyn(a)._2, 0, 1, syn1Global(index-vocabSize), 0, 1)
       }
 
       println(syn0Global(0)(0))
 
     }
 
+    writeToFile(outputPath, syn0Global, syn1Global)
+  }
+
+  private def writeToFile(outputPath: String, syn0: Array[Array[Float]], syn1: Array[Array[Float]]): Unit={
     val file1 = new PrintWriter(new File(outputPath+"/wordIndex.txt"))
     val file2 = new PrintWriter(new File(outputPath+"/syn0.txt"))
     val file3 = new PrintWriter(new File(outputPath+"/syn1.txt"))
@@ -365,8 +511,8 @@ class Sence2Vec extends Serializable{
     }
     for (a <- 0 to vocabSize-1) {
       for (b <-0 to vectorSize-1) {
-        file2.write(syn0Global(a)(b)+" ")
-        file3.write(syn1Global(a)(b)+" ")
+        file2.write(syn0(a)(b)+" ")
+        file3.write(syn1(a)(b)+" ")
       }
       file2.write("\n")
       file3.write("\n")
