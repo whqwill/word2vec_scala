@@ -21,14 +21,14 @@ class Sence2Vec extends Serializable{
   private var vectorSize = 100
   private var learningRate = 0.025
   private var numPartitions = 4
-  private var numIterations = 2
+  private var numEpoch = 2
   private var seed = util.Random.nextLong()
   private var minCount = 5
   private var negative = 5
   private var numSenses = 2
   private var window = 5
   private var sentenceIter = 5
-  private var numSentencesPerIter = 200
+  private var numSentencesPerIterPerCore = 200
   private var MAX_SENTENCE_LENGTH = 1000
   def setVectorSize(vectorSize: Int): this.type = {
     this.vectorSize = vectorSize
@@ -43,8 +43,8 @@ class Sence2Vec extends Serializable{
     this.numPartitions = numPartitions
     this
   }
-  def setNumIterations(numIterations: Int): this.type = {
-    this.numIterations = numIterations
+  def setNumEpoch(numEpoch: Int): this.type = {
+    this.numEpoch = numEpoch
     this
   }
   def setSeed(seed: Long): this.type = {
@@ -71,8 +71,8 @@ class Sence2Vec extends Serializable{
     this.sentenceIter = sentenceIter
     this
   }
-  def setNumSentencesPerIter(numSentencesPerIter: Int): this.type = {
-    this.numSentencesPerIter = numSentencesPerIter
+  def setNumSentencesPerIterPerCore(numSentencesPerIterPerCore: Int): this.type = {
+    this.numSentencesPerIterPerCore = numSentencesPerIterPerCore
     this
   }
   def setMAX_SENTENCE_LENGTH(MAX_SENTENCE_LENGTH: Int): this.type = {
@@ -220,7 +220,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
     val syn0Global = new Array[Array[Float]](vocabSize)
@@ -234,16 +234,20 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
 
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
       val tmpRDD = sentenceSplit(index).mapPartitionsWithIndex { (idx,iter) =>
@@ -261,6 +265,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           for (posW <- 0 to sentence.size-1) {
 
@@ -324,6 +330,8 @@ class Sence2Vec extends Serializable{
         val index = updateSyn(a)._1
         if (index == 10)
           println("index=10 "+countSyn(index))
+        if (index == 100)
+          println("index=100 "+countSyn(index))
         if (index < vocabSize) {
           for (i <- 0 to vectorSize-1)
             syn0Global(index)(i) = 0.0f
@@ -342,6 +350,7 @@ class Sence2Vec extends Serializable{
 
       println(syn0Global(0)(0))
 
+      wordCount = accWordCount.value
     }
 
     writeToFile(outputPath, syn0Global, syn1Global)
@@ -372,7 +381,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
     val syn0Global = new Array[Array[Float]](vocabSize)
@@ -386,17 +395,20 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
 
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      //alpha *= 0.5
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
       val tmpRDD = sentenceSplit(index).mapPartitionsWithIndex { (idx,iter) =>
@@ -414,6 +426,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           for (posW <- 0 to sentence.size-1) {
 
@@ -447,7 +461,7 @@ class Sence2Vec extends Serializable{
                   num = v1Option.get._2
                 }
                 blas.saxpy(hyperPara.vectorSize, 1.0f, deltaU, 1, v1, 1)
-                synHash.put(u+hyperPara.vocabSize, (v1,num+addNum))
+                synHash.put(u+hyperPara.vocabSize, (v1,num+1))
               }
 
             var Z = w
@@ -472,7 +486,7 @@ class Sence2Vec extends Serializable{
                 num = v0Option.get._2
               }
               blas.saxpy(hyperPara.vectorSize, 1.0f, deltaZ, 1, v0, 1)
-              synHash.put(Z, (v0,num+addNum))
+              synHash.put(Z, (v0,num+1))
             }
           }
         }
@@ -487,10 +501,15 @@ class Sence2Vec extends Serializable{
       bcSyn0Global.unpersist()
       bcSyn1Global.unpersist()
 
+      var countGradient = 0
+
       for (a<-0 to updateSyn.size-1) {
+        countGradient += updateSyn(a)._2._2
         val index = updateSyn(a)._1
         if (index == 10)
           println("index=10 count="+updateSyn(a)._2._2)
+        if (index == vocabSize+100)
+          println("index=vocabSize+100 count="+updateSyn(a)._2._2)
         if (index < vocabSize)
           blas.saxpy(vectorSize, alpha.toFloat/updateSyn(a)._2._2, updateSyn(a)._2._1, 1, syn0Global(index), 1)
         else
@@ -498,6 +517,9 @@ class Sence2Vec extends Serializable{
       }
 
       println(syn0Global(0)(0))
+      println("words per core: "+((accWordCount.value-wordCount).toFloat/numPartitions).toInt)
+      println("gradients per core: "+(countGradient.toFloat/numPartitions).toInt)
+      wordCount = accWordCount.value
 
     }
 
@@ -618,7 +640,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
     val syn0Global = new Array[Array[Float]](vocabSize)
@@ -628,23 +650,27 @@ class Sence2Vec extends Serializable{
       syn1Global(a) = new Array[Float](vectorSize)
     }
 
-    val bcSyn0Global = sc.broadcast(syn0Global)
-    val bcSyn1Global = sc.broadcast(syn1Global)
 
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+    val bcSyn0Global = sc.broadcast(syn0Global)
+    val bcSyn1Global = sc.broadcast(syn1Global)
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
+
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
-
       //newSentences.sample(false, 1.0/numRDD).foreachPartition { iter =>
       sentenceSplit(index).foreachPartition { iter =>
 
@@ -655,6 +681,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           for (posW <- 0 to sentence.size-1) {
 
@@ -695,6 +723,8 @@ class Sence2Vec extends Serializable{
 
       println(syn0Global(0)(0))
 
+      wordCount = accWordCount.value
+
     }
 
     writeToFile(outputPath, syn0Global, syn1Global)
@@ -727,7 +757,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
@@ -754,14 +784,18 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
 
@@ -778,6 +812,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           var flag = false
 
@@ -854,6 +890,8 @@ class Sence2Vec extends Serializable{
 
       println("syn0Global(0)(0)="+syn0Global(0)(0))
 
+      println("words per core: "+((accWordCount.value-wordCount).toFloat/numPartitions).toInt)
+      wordCount = accWordCount.value
     }
 
     writeToFileWithSenses(outputPath, syn0Global, syn1Global)
@@ -885,7 +923,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIterPerCore
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
@@ -902,14 +940,19 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
+
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
 
@@ -926,6 +969,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           var flag = false
 
@@ -1002,6 +1047,7 @@ class Sence2Vec extends Serializable{
 
       println("syn0Global(0)(0)="+syn0Global(0)(0))
 
+      wordCount = accWordCount.value
     }
 
     writeToFileWithSenses(outputPath, syn0Global, syn1Global)
@@ -1088,7 +1134,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIterPerCore
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
@@ -1117,14 +1163,19 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
+
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
 
@@ -1141,6 +1192,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           var flag = false
 
@@ -1217,6 +1270,7 @@ class Sence2Vec extends Serializable{
 
       println("syn0Global(0)(0)="+syn0Global(0)(0))
 
+      wordCount = accWordCount.value
     }
 
     writeToFileWithSensesVariant(outputPath, syn0Global, syn1Global)
@@ -1249,7 +1303,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIter
+    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIterPerCore
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
@@ -1270,14 +1324,18 @@ class Sence2Vec extends Serializable{
     println("numRDD="+numRDD)
     println()
 
-    for (k <- 1 to numRDD*numIterations) {
+    var wordCount = 0
+
+    for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - (k-1)*1.0/numRDD/numIterations)
+      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
-      println("wordCount = " + (k-1)*numSentencesPerIter*MAX_SENTENCE_LENGTH + ", alpha = " + alpha)
+      println("wordCount = " + wordCount + ", alpha = " + alpha)
+
+      val accWordCount = sc.accumulator(wordCount)
 
       println("index = "+index)
 
@@ -1294,6 +1352,8 @@ class Sence2Vec extends Serializable{
         while (iter.hasNext) {
 
           val sentence = iter.next()
+
+          accWordCount += sentence.size
 
           var flag = false
 
@@ -1370,6 +1430,7 @@ class Sence2Vec extends Serializable{
 
       println("syn0Global(0)(0)="+syn0Global(0)(0))
 
+      wordCount = accWordCount.value
     }
 
     writeToFileWithSensesVariant(outputPath, syn0Global, syn1Global)

@@ -22,7 +22,7 @@ object Main_new2 {
 
     println(words.take(100).reduce((a,b)=>a+" "+b))
 
-    val sen2Vec = new Sence2Vec().setNumPartitions(args(1).toInt).setNumSentencesPerIter(args(2).toInt).setNumIterations(args(3).toInt).setLearningRate(args(4).toFloat).setNegative(args(5).toInt).setWindow(args(6).toInt).setMinCount(args(7).toInt).setSeed(args(8).toLong).setVectorSize(args(9).toInt).setMAX_SENTENCE_LENGTH(args(10).toInt).setNumSenses(args(11).toInt).setSentenceIter(args(12).toInt)
+    val sen2Vec = new Sence2Vec().setNumPartitions(args(1).toInt).setNumSentencesPerIterPerCore(args(2).toInt).setNumEpoch(args(3).toInt).setLearningRate(args(4).toFloat).setNegative(args(5).toInt).setWindow(args(6).toInt).setMinCount(args(7).toInt).setSeed(args(8).toLong).setVectorSize(args(9).toInt).setMAX_SENTENCE_LENGTH(args(10).toInt).setNumSenses(args(11).toInt).setSentenceIter(args(12).toInt)
 
     sen2Vec.trainMSSkipGramLocalVariant(words, args(13))
 

@@ -21,7 +21,7 @@ object Main {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).map(s=>s.toLowerCase)
+    val words = input.flatMap(x => x).map(s=>s.toLowerCase).filter(s=>s(s.size-1).isLetter||s(s.size-1).isDigit)
 
 
     val skipgram = new SkipGram().setNumPartitions(args(1).toInt).setNumIterations(args(2).toInt).setNegative(args(3).toInt).setMinCount(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSample(args(7).toDouble)
