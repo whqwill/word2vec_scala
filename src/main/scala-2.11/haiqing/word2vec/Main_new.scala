@@ -31,7 +31,10 @@ object Main_new {
     */
 
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
-    val words = input.flatMap(x => x).filter(s=>s.length>0).filter(s=>s(0).isLetter).map(s => s.toLowerCase).filter(s=>s(s.size-1).isLetter||s(s.size-1).isDigit)
+
+    println(input.flatMap(x => x).count())
+
+    val words = input.flatMap(x => x).map(x=>x.toLowerCase)
 
 
     //val errs = input.flatMap(x => x).filter(s=>s.length>0).filter(s=>(!s(0).isLetter))

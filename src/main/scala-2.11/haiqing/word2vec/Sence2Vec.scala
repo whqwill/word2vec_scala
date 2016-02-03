@@ -923,7 +923,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIterPerCore
+    val numRDD = (trainWordsCount/MAX_SENTENCE_LENGTH)/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
@@ -944,7 +944,6 @@ class Sence2Vec extends Serializable{
 
     for (k <- 1 to numRDD*numEpoch) {
       println("Iteration "+k)
-
 
       val index = (k-1)%(numRDD)
 
@@ -1303,7 +1302,7 @@ class Sence2Vec extends Serializable{
     }
 
     val newSentences = sentences.repartition(numPartitions).cache()
-    val numRDD = trainWordsCount/MAX_SENTENCE_LENGTH/numSentencesPerIterPerCore
+    val numRDD = (trainWordsCount/MAX_SENTENCE_LENGTH)/(numSentencesPerIterPerCore*numPartitions)
     val sentenceSplit = newSentences.randomSplit(new Array[Double](numRDD).map(x=>x+1))
     var alpha = learningRate
 
