@@ -30,6 +30,7 @@ class Sence2Vec extends Serializable{
   private var sentenceIter = 5
   private var numSentencesPerIterPerCore = 200
   private var MAX_SENTENCE_LENGTH = 1000
+  private var multiSenseRate = 0.5
   def setVectorSize(vectorSize: Int): this.type = {
     this.vectorSize = vectorSize
     this
@@ -79,6 +80,10 @@ class Sence2Vec extends Serializable{
     this.MAX_SENTENCE_LENGTH = MAX_SENTENCE_LENGTH
     this
   }
+  def setMultiSenseRate(multiSenseRate: Double): this.type = {
+    this.multiSenseRate = multiSenseRate
+    this
+  }
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
@@ -89,6 +94,7 @@ class Sence2Vec extends Serializable{
   private var vocab: Array[VocabWord] = null
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var trainWordsCount = 0
+  private var senseTable: Array[Int] = null
 
   private def createExpTable(): Array[Float] = {
     val expTable = new Array[Float](EXP_TABLE_SIZE)
@@ -129,6 +135,9 @@ class Sence2Vec extends Serializable{
       .sortWith((a, b) => a.cn > b.cn)
 
     vocabSize = vocab.length
+
+    senseTable = new Array[Int](vocabSize)
+
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
 
@@ -139,8 +148,19 @@ class Sence2Vec extends Serializable{
       a += 1
     }
 
-    //for (a <- vocab.toIterator)
-    //  println(a)
+    var numMultiSenseWords = 0
+    a = 0
+    while (a < vocabSize) {
+      if (vocab(a).cn > trainWordsCount / vocabSize) {
+        senseTable(a) = 2
+        numMultiSenseWords += 1
+      }
+      else
+        senseTable(a) = 1
+      a += 1
+    }
+
+    println("numMultiSenseWords = " + numMultiSenseWords)
     println("vocabSize = " + vocabSize)
     println("trainWordsCount = " + trainWordsCount)
 
@@ -737,6 +757,8 @@ class Sence2Vec extends Serializable{
     val bcVocabHash = sc.broadcast(vocabHash)
     val bcHyperPara = sc.broadcast(HyperPara(seed, MAX_SENTENCE_LENGTH, EXP_TABLE_SIZE, MAX_EXP, TABEL_SIZE, vocabSize, vectorSize, window, negative, numSenses, sentenceIter, createExpTable(), makeTable()))
 
+    vocab.toSeq.sortBy(_.cn).toArray
+
     //generate sentences from words (senses are generated randomly)
     val sentences: RDD[Array[Int]] = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -763,17 +785,17 @@ class Sence2Vec extends Serializable{
 
     val syn0Single = Source.fromFile(synPath+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     val syn1Single = Source.fromFile(synPath+"/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
-    val syn0Global = new Array[Array[Float]](vocabSize*numSenses)
-    val syn1Global = new Array[Array[Float]](vocabSize*numSenses)
+    val syn0Global = new Array[Array[Array[Float]]](vocabSize)
+    val syn1Global = new Array[Array[Array[Float]]](vocabSize)
     for (w <- 0 to vocabSize-1) {
 
-      for (s <- 0 to numSenses - 1) {
-        syn0Global(w+vocabSize*s) = new Array[Float](vectorSize)
-        syn1Global(w+vocabSize*s) = new Array[Float](vectorSize)
+      syn0Global(w) = new Array[Array[Float]](senseTable(w))
+
+      for (s <- 0 to senseTable(w) - 1) {
 
         for (i <- 0 to vectorSize-1) {
-          syn0Global(w+vocabSize*s)(i) = syn0Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
-          syn1Global(w+vocabSize*s)(i) = syn1Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn0Global(w)(s)(i) = syn0Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn1Global(w)(s)(i) = syn1Single(w*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
         }
       }
     }

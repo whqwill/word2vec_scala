@@ -1,5 +1,7 @@
 package haiqing.word2vec
 
+import java.io.{FileInputStream, IOException, FileOutputStream}
+
 import org.apache.spark.{SparkContext, SparkConf}
 
 import scala.compat.Platform._
