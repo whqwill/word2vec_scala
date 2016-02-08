@@ -821,7 +821,8 @@ class Sence2Vec extends Serializable{
 
       println("index = "+index)
 
-      //newSentences.sample(false, 1.0/numRDD).foreachPartition { iter =>
+
+      //assign senses
       val tmpRDD = sentenceSplit(index).mapPartitions { iter =>
 
         var sumIter = 0
@@ -856,6 +857,8 @@ class Sence2Vec extends Serializable{
                 NEG(i) = NEG(i) + hyperPara.vocabSize*util.Random.nextInt(hyperPara.numSenses)
               }
 
+
+              /*
               //select the best sense
               sentence(posW) = sentence(posW)%vocabSize
               var bestSense = 0
@@ -894,7 +897,7 @@ class Sence2Vec extends Serializable{
                 val deltaZ = getGradientZLocal(syn0, syn1, posW, Z, label, sentence, hyperPara)
                 blas.saxpy(hyperPara.vectorSize, alpha.toFloat, deltaZ, 1, syn0(Z), 1)
               }
-
+*/
             }
             sIter+=1
           }
@@ -904,11 +907,95 @@ class Sence2Vec extends Serializable{
         println("newIter.size="+newIter.size+" sumSentenceIter="+sumIter)
         newIter.toIterator
       }.cache()
-
       println("tmpRDD.count()="+tmpRDD.count())
-
       sentenceSplit(index).unpersist()
       sentenceSplit(index) = tmpRDD
+
+      //learn parameters
+      sentenceSplit(index).foreachPartition { iter =>
+
+        var sumIter = 0
+        val hyperPara = bcHyperPara.value
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+
+        val newIter = mutable.MutableList[Array[Int]]()
+
+        while (iter.hasNext) {
+
+          val sentence = iter.next()
+
+          accWordCount += sentence.size
+
+          var flag = false
+
+          var sIter = 1
+
+          while (sIter <= hyperPara.sentenceIter && (sIter == 1 || flag)) {
+
+            for (posW <- 0 to sentence.size - 1) {
+
+              var w = sentence(posW)
+
+              //generate negative sampling (senses are generated randomly)
+              val NEG = new Array[Int](hyperPara.negative)
+              for (i <- 0 to hyperPara.negative - 1) {
+                NEG(i) = hyperPara.table(Math.abs(util.Random.nextLong() % hyperPara.TABEL_SIZE).toInt)
+                if (NEG(i) <= 0)
+                  NEG(i) = (Math.abs(util.Random.nextLong()) % (hyperPara.vocabSize - 1) + 1).toInt
+                NEG(i) = NEG(i) + hyperPara.vocabSize*util.Random.nextInt(hyperPara.numSenses)
+              }
+
+
+              /*
+              //select the best sense
+              sentence(posW) = sentence(posW)%vocabSize
+              var bestSense = 0
+              var bestScore = getScore(syn0,syn1,NEG,posW,sentence,hyperPara)
+              for (sense <- 1 to numSenses - 1) {
+                sentence(posW) = sentence(posW)%vocabSize + vocabSize*sense
+                val tmpScore = getScore(syn0,syn1,NEG,posW,sentence,hyperPara)
+                if (tmpScore > bestScore) {
+                  bestScore = tmpScore
+                  bestSense = sense
+                }
+              }
+              sentence(posW) = sentence(posW)%vocabSize + vocabSize*bestSense
+
+              //record if center word's sense is changed
+              if (sentence(posW) != w)
+                flag = true
+              w = sentence(posW)
+
+              //update syn1 (syn1 is for predicting surrounding word u)
+              for (posU <- posW - hyperPara.window + 1 to posW + hyperPara.window - 1)
+                if (posU >= 0 && posU < sentence.size && posU != posW) {
+                  val u = sentence(posU)
+                  val deltaU = getGradientULocal(syn0, syn1, w, u, NEG, hyperPara)
+                  blas.saxpy(hyperPara.vectorSize, alpha.toFloat, deltaU, 1, syn1(u), 1)
+                }
+
+              //update syn0 (syn0 is for vectors of center word Z)
+              var Z = w
+              var label = 1
+              for (d <- -1 to NEG.size - 1) {
+                if (d >= 0) {
+                  Z = NEG(d)
+                  label = 0
+                }
+                val deltaZ = getGradientZLocal(syn0, syn1, posW, Z, label, sentence, hyperPara)
+                blas.saxpy(hyperPara.vectorSize, alpha.toFloat, deltaZ, 1, syn0(Z), 1)
+              }
+*/
+            }
+            sIter+=1
+          }
+          sumIter += sIter
+          newIter+=sentence
+        }
+        println("newIter.size="+newIter.size+" sumSentenceIter="+sumIter)
+        newIter.toIterator
+      }
 
       println("syn0Global(0)(0)="+syn0Global(0)(0))
 
