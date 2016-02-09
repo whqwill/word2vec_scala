@@ -1,19 +1,9 @@
-Word2Vec.scala.bk3 is the backup of summing gradient and less negative sampling version 
-Word2Vec.scala.bk2 is the backup of summing gradient version
-Word2Vec.scala.bk is the backup of averaging lookup-table version
+class			parameters
 
-task now:
-1.MSSkipGram read lookup-table from file, parameter matrix is zero (averaging lookup-table version)
-2.SkipGram: summing gradient version
+testSenseVectors	./oneSense day_0 bank_0
 
-I am debuging the summing gradient version, there are something I need to change:
-1.change the average of gradient to sum
-2.monitor the training, accuracy or loss??
+testVectors		./ day bank
 
-another version is possible: change negative sampling of lastword to negative sampling of word
+Main_new		raw_sentences.txt 5 2 0.025 5 5 5 42 100 3000 ./ day  local
 
-loss of training dataset is to evaluate the convergence of algorithm
-loss of testing dataset is to evaluate if the algorithm is good
-
-NEXT TASK:
-TRAIN NEW VERSION OF MSSKIPGRAM
+Main_sense		./raw_sentences.txt 5 3000 5 100 2 5 5 0.025f 42 ./oneSense

@@ -684,7 +684,7 @@ class Sence2Vec extends Serializable{
 
       val index = (k-1)%(numRDD)
 
-      alpha = learningRate * (1 - wordCount/(trainWordsCount*numEpoch))
+      alpha = learningRate * (1 - wordCount*1.0f/(trainWordsCount*numEpoch))
       if (alpha < learningRate * 0.0001) alpha = learningRate * 0.0001
       println("wordCount = " + wordCount + ", alpha = " + alpha)
 
@@ -1003,7 +1003,7 @@ class Sence2Vec extends Serializable{
       wordCount = accWordCount.value
     }
 
-    writeToFileWithSenses(outputPath, syn0Global, syn1Global)
+    //writeToFileWithSenses(outputPath, syn0Global, syn1Global)
   }
   def trainMSSkipGramLocal(words: RDD[String], outputPath: String): Unit = {
 

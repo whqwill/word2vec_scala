@@ -36,12 +36,13 @@ object Main_new {
 
     println(input.flatMap(x => x).count())
 
-    val words = input.flatMap(x => x).map(x=>x.toLowerCase)
+    val words = input.flatMap(x => x).map(x=>x.toLowerCase).filter(x=>x.size>0).filter(x=>x.size>1||x(0).isLetter||x(0).isDigit)
 
 
     //val errs = input.flatMap(x => x).filter(s=>s.length>0).filter(s=>(!s(0).isLetter))
     println(words.take(100).reduce((a,b)=>a+" "+b))
 
+    println("words.count()="+words.count())
 
     val sen2Vec = new Sence2Vec().setNumPartitions(sc.defaultParallelism).setNumSentencesPerIterPerCore(args(1).toInt).setNumEpoch(args(2).toInt).setLearningRate(args(3).toFloat).setNegative(args(4).toInt).setWindow(args(5).toInt).setMinCount(args(6).toInt).setSeed(args(7).toLong).setVectorSize(args(8).toInt).setMAX_SENTENCE_LENGTH(args(9).toInt)
 
