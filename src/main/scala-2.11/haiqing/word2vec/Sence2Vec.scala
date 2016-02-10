@@ -142,6 +142,7 @@ class Sence2Vec extends Serializable{
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
 
+    println(vocabSize)
     var a = 0
     while (a < vocabSize) {
       vocabHash += vocab(a).word -> a

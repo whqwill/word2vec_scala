@@ -37,7 +37,7 @@ object Main_sense {
       oldTime = currentTime
     }
     else {
-      println("learn vocabulary without sense ... ... ...")
+      println("learn vocabulary without sense ... ...  ...")
       senseModel.learnVocabWithoutSense(args(1).toInt)
       println("time:" + (currentTime - oldTime) / 1000.0)
       oldTime = currentTime

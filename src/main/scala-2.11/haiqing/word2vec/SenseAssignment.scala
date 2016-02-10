@@ -134,6 +134,7 @@ class SenseAssignment extends Serializable {
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
 
+    println(vocabSize)
     for (a <- 0 to vocabSize - 1) {
       vocabHash += vocab(a).word -> a
       totalWords += vocab(a).cn
@@ -162,7 +163,6 @@ class SenseAssignment extends Serializable {
     val sc = words.context
     val bcVacabHash = sc.broadcast(vocabHash)
     val bcNumSensesTable = sc.broadcast(senseTable)
-    val bcVocabSize = sc.broadcast(vocabSize)
 
     sentences = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
@@ -174,7 +174,7 @@ class SenseAssignment extends Serializable {
           while (iter.hasNext && sentenceLength < maxSentenceLength) {
             val word = bcVacabHash.value.get(iter.next())
             if (word.nonEmpty) {
-              sentence += word.get + bcVocabSize.value * util.Random.nextInt(bcNumSensesTable.value(word.get))
+              sentence += word.get * 100 + util.Random.nextInt(bcNumSensesTable.value(word.get))
               sentenceLength += 1
             }
           }
@@ -296,16 +296,19 @@ class SenseAssignment extends Serializable {
       println("iteration = " + iteration + "   indexRDD = " + indexRDD + "   alpha = " + alpha)
 
 
-      sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitions { sentenceIter =>
+      for (k <- 1 to 5) {
+        println("k="+k)
+        sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitions { sentenceIter =>
 
-        //println("mapPartitions ... ... ...")
-        val newSentenceIter = mutable.MutableList[Array[Int]]()
-        for (sentence <- sentenceIter) {
-          val newSentence = adjustAssignment(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
-          newSentenceIter += newSentence
-        }
-        newSentenceIter.toIterator
-      }.cache()
+          //println("mapPartitions ... ... ...")
+          val newSentenceIter = mutable.MutableList[Array[Int]]()
+          for (sentence <- sentenceIter) {
+            val newSentence = adjustAssignment(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
+            newSentenceIter += newSentence
+          }
+          newSentenceIter.toIterator
+        }.cache()
+      }
 
       sentencesSplit(indexRDD).foreachPartition { sentencesIterator =>
         //println("foreachPartition ... ... ...")
@@ -336,10 +339,10 @@ class SenseAssignment extends Serializable {
 
       val negSamples = getNegSamples(numNeg, negTable, senseTable, vocabSize)
       val neighbors = getNeighbors(sentence, wordPos, window)
-      val word = sentence(wordPos) % vocabSize
-      val bestSense = getBestSense(word, neighbors, negSamples, senseTable(word), syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize)
+      val word = sentence(wordPos) / 100
+      val bestSense = getBestSense(word, neighbors, negSamples, senseTable(word), syn0Sense, syn1Sense, expTable, MAX_EXP)
 
-      sentence(wordPos) = word + bestSense * vocabSize
+      sentence(wordPos) = word * 100+ bestSense
     }
     sentence
   }
@@ -354,7 +357,7 @@ class SenseAssignment extends Serializable {
       if (negSamples(i) <= 0)
         negSamples(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
       //add sense information (assign sense randomly)
-      negSamples(i) = negSamples(i) + vocabSize * util.Random.nextInt(senseTable(negSamples(i)))
+      negSamples(i) = negSamples(i) * 100 + util.Random.nextInt(senseTable(negSamples(i)))
     }
     negSamples
   }
@@ -369,14 +372,14 @@ class SenseAssignment extends Serializable {
     neighbors.result()
   }
 
-  private def getBestSense(word: Int, neighbors: Array[Int], negSamples: Array[Int], numSenses: Int, syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Int = {
+  private def getBestSense(word: Int, neighbors: Array[Int], negSamples: Array[Int], numSenses: Int, syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int): Int = {
     //println("getBestSense ... ... ...")
 
     var bestSense = -1
     var bestScore = 0.0
     for (sense <- 0 to numSenses - 1) {
       //println("getBestSense ... ... ..."+ "word:" +word+" sense:"+sense)
-      val score = getScore(word, sense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize)
+      val score = getScore(word, sense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP)
       if (bestSense == -1 || score > bestScore) {
         bestScore = score
         bestSense = sense
@@ -385,20 +388,20 @@ class SenseAssignment extends Serializable {
     bestSense
   }
 
-  private def getScore(word: Int, sense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Double = {
+  private def getScore(word: Int, sense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int): Double = {
     //println("getScore ... ... ...")
 
     var score = 0.0
     for (neighber <- neighbors) {
 
-      val neighberWord = neighber % vocabSize
-      val neighberSense = neighber / vocabSize
+      val neighberWord = neighber / 100
+      val neighberSense = neighber % 100
       //println("getScore ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
       score += math.log(activeFunction(syn1Sense(word)(sense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
 
       for (negSample <- negSamples) {
-        val negWord = negSample % vocabSize
-        val negSense = negSample / vocabSize
+        val negWord = negSample / 100
+        val negSense = negSample % 100
         //println("getScore ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
         if (negWord != word)
           score += math.log(1 - activeFunction(syn1Sense(negWord)(negSense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
@@ -443,21 +446,21 @@ class SenseAssignment extends Serializable {
       val neighbors = getNeighbors(sentence, wordPos, window)
       val wordWithSense = sentence(wordPos)
 
-      learn(wordWithSense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize, alpha)
+      learn(wordWithSense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, alpha)
     }
   }
 
-  private def learn(wordWithSense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int, alpha: Float): Unit = {
+  private def learn(wordWithSense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, alpha: Float): Unit = {
     //println("learn ... ... ...")
 
-    val word = wordWithSense % vocabSize
-    val sense = wordWithSense / vocabSize
+    val word = wordWithSense / 100
+    val sense = wordWithSense % 100
     //println("learn ... ... ..."+"word:" +word+" sense:"+sense)
     val vectorSize = syn0Sense(0)(0).length
 
     for (neighbor <- neighbors) {
-      val neighberWord = neighbor % vocabSize
-      val neighberSense = neighbor / vocabSize
+      val neighberWord = neighbor / 100
+      val neighberSense = neighbor % 100
       //println("learn ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
       val neu1e = new Array[Float](vectorSize)
 
@@ -467,8 +470,8 @@ class SenseAssignment extends Serializable {
 
       for (negSample <- negSamples) {
 
-        val negWord = negSample % vocabSize
-        val negSense = negSample / vocabSize
+        val negWord = negSample / 100
+        val negSense = negSample % 100
         //println("learn ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
         if (negWord != word) {
 
