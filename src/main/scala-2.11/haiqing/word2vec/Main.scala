@@ -97,7 +97,7 @@ object Processing {
     val wordIndex = collection.mutable.Map[String, Int]()
     for (line <- Source.fromFile(path+"/wordIndex.txt").getLines()) {
       val pair = line.split(" ")
-      println(line.toString)
+      //println(line.toString)
       wordIndex.put(pair(1), pair(0).toInt)
     }
     val wordVectors = Source.fromFile(path+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray

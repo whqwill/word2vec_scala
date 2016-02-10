@@ -4,6 +4,6 @@ testSenseVectors	./oneSense day_0 bank_0
 
 testVectors		./ day bank
 
-Main_new		raw_sentences.txt 5 2 0.025 5 5 5 42 100 3000 ./ day  local
+Main_new		./raw_sentences.txt 5 2 0.025 5 5 5 42 100 3000 ./ day  local
 
 Main_sense		./raw_sentences.txt 5 3000 5 100 2 5 5 0.025f 42 ./oneSense

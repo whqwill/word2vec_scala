@@ -5,6 +5,12 @@ package haiqing.word2vec
  */
 object testVectors {
   def main(args: Array[String]): Unit = {
+
+    println(1.0f.toByte)
+
+    return
+
+
     val model = Processing.loadModel(args(0))
     //val model = Processing.loadTmpModel("./data_new",2000)
 

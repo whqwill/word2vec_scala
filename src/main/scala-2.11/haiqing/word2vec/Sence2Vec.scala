@@ -1,6 +1,7 @@
 package haiqing.word2vec
 
-import java.io.{File, PrintWriter}
+import java.io._
+import java.nio.ByteBuffer
 
 import com.github.fommil.netlib.BLAS._
 import org.apache.spark.SparkContext
@@ -1601,11 +1602,21 @@ class Sence2Vec extends Serializable{
     val file1 = new PrintWriter(new File(outputPath+"/wordIndex.txt"))
     val file2 = new PrintWriter(new File(outputPath+"/syn0.txt"))
     val file3 = new PrintWriter(new File(outputPath+"/syn1.txt"))
-    val iter = vocabHash.toIterator
-    while (iter.hasNext) {
-      val tmp = iter.next()
-      file1.write(tmp._2+" "+tmp._1+"\n")
+    val file4 = new PrintWriter(new File(outputPath+"/vectors.txt"))
+
+    file4.write(vocabSize+" "+vectorSize+"\n")
+
+    val wordIndex = vocabHash.toArray.sortWith((a, b) => a._2 < b._2)
+    for ((wordString, word) <- wordIndex) {
+      file1.write(word + " " + wordString + "\n")
+      //println(wordString + "_" + sense + " " + word)
+
+      file4.write(wordString)
+      for (i<- 0 to vectorSize-1)
+        file4.write(" "+syn0(word)(i))
+      file4.write("\n")
     }
+
     for (a <- 0 to vocabSize-1) {
       for (b <-0 to vectorSize-1) {
         file2.write(syn0(a)(b)+" ")
@@ -1617,6 +1628,7 @@ class Sence2Vec extends Serializable{
     file1.close()
     file2.close()
     file3.close()
+    file4.close()
   }
 
   def trainMSSkipGram(words: RDD[String], synPath: String, outputPath: String): Unit = {

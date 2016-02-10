@@ -1,6 +1,6 @@
 package haiqing.word2vec
 
-import java.io.{File, PrintWriter}
+import java.io._
 
 import com.github.fommil.netlib.BLAS._
 import org.apache.spark.broadcast.Broadcast
@@ -13,7 +13,7 @@ import com.github.fommil.netlib.BLAS.{getInstance => blas}
 /**
  * Created by hwang on 09.02.16.
  */
-class SenseAssignment extends Serializable{
+class SenseAssignment extends Serializable {
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
@@ -35,18 +35,18 @@ class SenseAssignment extends Serializable{
   private def makeNegativaSampleTable(): Array[Int] = {
     val table = new Array[Int](TABEL_SIZE)
     var trainWordsPow = 0.0
-    for (a <- 0 to vocabSize-1)
+    for (a <- 0 to vocabSize - 1)
       trainWordsPow += Math.pow(vocab(a).cn, POWER)
     var i = 0
-    var d1 = Math.pow(vocab(i).cn,POWER) / trainWordsPow
-    for (a <- 0 to TABEL_SIZE-1) {
+    var d1 = Math.pow(vocab(i).cn, POWER) / trainWordsPow
+    for (a <- 0 to TABEL_SIZE - 1) {
       table(a) = i
-      if (a*1.0/TABEL_SIZE > d1) {
+      if (a * 1.0 / TABEL_SIZE > d1) {
         i += 1
         d1 += Math.pow(vocab(i).cn, POWER) / trainWordsPow
       }
       if (i >= vocabSize)
-        i = vocabSize-1
+        i = vocabSize - 1
     }
     table
   }
@@ -61,9 +61,9 @@ class SenseAssignment extends Serializable{
   private var sentences: RDD[Array[Int]] = null
   private var totalSentences = 0
   private var numRDDs = 0
-  private var sentencesSplit : Array[RDD[Array[Int]]] = null
-  private var syn0Sense : Array[Array[Array[Float]]] = null
-  private var syn1Sense : Array[Array[Array[Float]]] = null
+  private var sentencesSplit: Array[RDD[Array[Int]]] = null
+  private var syn0Sense: Array[Array[Array[Float]]] = null
+  private var syn1Sense: Array[Array[Array[Float]]] = null
   private var vectorSize = 0
   private var learned = false
 
@@ -74,9 +74,9 @@ class SenseAssignment extends Serializable{
 
   def preprocessData(): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.")
-    words = words.map(x=>x.toLowerCase).filter(x=>x.size>0).filter(x=>x.size>1||x(0).isLetter||x(0).isDigit).cache()
+    words = words.map(x => x.toLowerCase).filter(x => x.size > 0).filter(x => x.size > 1 || x(0).isLetter || x(0).isDigit).cache()
     words.count()
-    println("words.count()="+words.count())
+    println("words.count()=" + words.count())
   }
 
   def learnVocab(minCount: Int = 5): Unit = {
@@ -93,7 +93,7 @@ class SenseAssignment extends Serializable{
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
 
-    for (a <- 0 to vocabSize-1) {
+    for (a <- 0 to vocabSize - 1) {
       vocabHash += vocab(a).word -> a
       totalWords += vocab(a).cn
 
@@ -103,7 +103,7 @@ class SenseAssignment extends Serializable{
     senseTable = new Array[Int](vocabSize)
 
     println("print some words in vocabulary: ")
-    for (a <- 0 to vocabSize-1) {
+    for (a <- 0 to vocabSize - 1) {
       if (vocab(a).cn > totalWords / vocabSize) {
         senseTable(a) = 2
         multiSenseWords += 1
@@ -111,7 +111,7 @@ class SenseAssignment extends Serializable{
       else
         senseTable(a) = 1
       if (util.Random.nextInt(vocabSize) < 30)
-        println(vocab(a).toString+"  numSenses:"+senseTable(a))
+        println(vocab(a).toString + "  numSenses:" + senseTable(a))
     }
 
     println("multiSenseWords = " + multiSenseWords)
@@ -133,7 +133,7 @@ class SenseAssignment extends Serializable{
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
       "the setting of minCount, which could be large enough to remove all your words in sentences.")
 
-    for (a <- 0 to vocabSize-1) {
+    for (a <- 0 to vocabSize - 1) {
       vocabHash += vocab(a).word -> a
       totalWords += vocab(a).cn
 
@@ -142,10 +142,10 @@ class SenseAssignment extends Serializable{
     senseTable = new Array[Int](vocabSize)
 
     println("print some words in vocabulary: ")
-    for (a <- 0 to vocabSize-1) {
+    for (a <- 0 to vocabSize - 1) {
       senseTable(a) = 1
       if (util.Random.nextInt(vocabSize) < 30)
-        println(vocab(a).toString+"  numSenses:"+senseTable(a))
+        println(vocab(a).toString + "  numSenses:" + senseTable(a))
     }
 
     println("vocabSize = " + vocabSize)
@@ -166,6 +166,7 @@ class SenseAssignment extends Serializable{
     sentences = words.mapPartitions { iter =>
       new Iterator[Array[Int]] {
         def hasNext: Boolean = iter.hasNext
+
         def next(): Array[Int] = {
           val sentence = ArrayBuilder.make[Int]
           var sentenceLength = 0
@@ -185,40 +186,40 @@ class SenseAssignment extends Serializable{
     println("totalSentences = " + totalSentences)
   }
 
-  def splitRDD(numSentencesPerIterPerCore : Int = 5): Unit = {
+  def splitRDD(numSentencesPerIterPerCore: Int = 5): Unit = {
     require(totalSentences > 0, "The number of sentences should be > 0. You may need to check if making sentences correctly.")
 
     val sc = words.context
     val numCores = sc.defaultParallelism
     val numSentencesPerIter = numSentencesPerIterPerCore * numCores
     numRDDs = totalSentences / numSentencesPerIter
-    sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x=>x+1))
+    sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x => x + 1))
 
     println("numSentencesPerIter = " + numSentencesPerIter)
     println("numRDDs = " + numRDDs)
   }
 
   //initialize from normal skip-gram model
-  def initializeParameters(synPath : String, vectorSize : Int): Unit = {
-    val syn0 = Source.fromFile(synPath+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
-    val syn1 = Source.fromFile(synPath+"/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
+  def initializeParameters(synPath: String, vectorSize: Int): Unit = {
+    val syn0 = Source.fromFile(synPath + "/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
+    val syn1 = Source.fromFile(synPath + "/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
 
-    require(vectorSize*vocabSize == syn0.size, "syn0.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn0 file is correct.")
-    require(vectorSize*vocabSize == syn1.size, "syn1.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn1 file is correct.")
+    require(vectorSize * vocabSize == syn0.size, "syn0.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn0 file is correct.")
+    require(vectorSize * vocabSize == syn1.size, "syn1.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn1 file is correct.")
 
     syn0Sense = new Array[Array[Array[Float]]](vocabSize)
     syn1Sense = new Array[Array[Array[Float]]](vocabSize)
 
-    for (word <- 0 to vocabSize-1) {
+    for (word <- 0 to vocabSize - 1) {
 
       syn0Sense(word) = new Array[Array[Float]](senseTable(word))
       syn1Sense(word) = new Array[Array[Float]](senseTable(word))
 
-      for (sense <- 0 to senseTable(word)-1) {
+      for (sense <- 0 to senseTable(word) - 1) {
 
-        for (i <- 0 to vectorSize-1) {
-          syn0Sense(word)(sense)(i) = syn0(word*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
-          syn1Sense(word)(sense)(i) = syn1(word*vectorSize+i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+        for (i <- 0 to vectorSize - 1) {
+          syn0Sense(word)(sense)(i) = syn0(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn1Sense(word)(sense)(i) = syn1(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
         }
       }
     }
@@ -227,17 +228,17 @@ class SenseAssignment extends Serializable{
   }
 
   //initialize randomly
-  def initializeParameters(vectorSize : Int = 100): Unit = {
+  def initializeParameters(vectorSize: Int = 100): Unit = {
 
     syn0Sense = new Array[Array[Array[Float]]](vocabSize)
     syn1Sense = new Array[Array[Array[Float]]](vocabSize)
 
-    for (word <- 0 to vocabSize-1) {
+    for (word <- 0 to vocabSize - 1) {
 
       syn0Sense(word) = new Array[Array[Float]](senseTable(word))
       syn1Sense(word) = new Array[Array[Float]](senseTable(word))
 
-      for (sense <- 0 to senseTable(word)-1) {
+      for (sense <- 0 to senseTable(word) - 1) {
 
         syn0Sense(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
         syn1Sense(word)(sense) = new Array[Float](vectorSize)
@@ -247,7 +248,7 @@ class SenseAssignment extends Serializable{
     this.vectorSize = vectorSize
   }
 
-  def train_local(numEpochs : Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed : Long = util.Random.nextLong()): Unit = {
+  def train_local(numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong()): Unit = {
     require(sentencesSplit.size > 0, "The number of sentences RDD should be > 0. You may need to check if splitting RDD correctly.")
     require(syn0Sense != null, "syn0Sense should not be null. You may need to check if initializing parameters correctly.")
     require(syn1Sense != null, "syn1Sense should not be null. You may need to check if initializing parameters correctly.")
@@ -276,7 +277,7 @@ class SenseAssignment extends Serializable{
 
     for (iteration <- 1 to totalInterations) {
 
-      var alpha = learningRate * (1 - iteration*1.0f/totalInterations)
+      var alpha = learningRate * (1 - iteration * 1.0f / totalInterations)
       if (alpha < learningRate * 0.0001f)
         alpha = learningRate * 0.0001f
 
@@ -284,7 +285,7 @@ class SenseAssignment extends Serializable{
       hyperPara.put("alpha", alpha)
       val bcHyperPara = sc.broadcast(hyperPara)
 
-      val indexRDD =  iteration % numRDDs
+      val indexRDD = iteration % numRDDs
 
       println("iteration = " + iteration + "   indexRDD = " + indexRDD + "   alpha = " + alpha)
 
@@ -306,17 +307,17 @@ class SenseAssignment extends Serializable{
           learnParameters(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
       }
 
-      println("syn0Sense(0)(0)(0)="+syn0Sense(0)(0)(0))
+      println("syn0Sense(0)(0)(0)=" + syn0Sense(0)(0)(0))
     }
 
     learned = true
   }
 
   //* sentence may need to be cloned
-  private def adjustAssignment(sentence: Array[Int], hyperPara : mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense : Array[Array[Array[Float]]], syn1Sense : Array[Array[Array[Float]]] ): Array[Int] = {
+  private def adjustAssignment(sentence: Array[Int], hyperPara: mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]]): Array[Int] = {
     //println("adjustAssignment ... ... ...")
 
-    for (wordPos <- 0 to sentence.size-1) {
+    for (wordPos <- 0 to sentence.size - 1) {
 
       require(hyperPara.get("numNeg").nonEmpty, "There is no hyperparameter \"numNeg\".")
       val numNeg = hyperPara.get("numNeg").get.asInstanceOf[Int]
@@ -330,14 +331,14 @@ class SenseAssignment extends Serializable{
       val negSamples = getNegSamples(numNeg, negTable, senseTable, vocabSize)
       val neighbors = getNeighbors(sentence, wordPos, window)
       val word = sentence(wordPos) % vocabSize
-      val bestSense = getBestSense(word,neighbors,negSamples,senseTable(word),syn0Sense,syn1Sense,expTable,MAX_EXP,vocabSize)
+      val bestSense = getBestSense(word, neighbors, negSamples, senseTable(word), syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize)
 
-      sentence(wordPos) = word+bestSense*vocabSize
+      sentence(wordPos) = word + bestSense * vocabSize
     }
     sentence
   }
 
-  private def getNegSamples(numNeg : Int, negTable: Array[Int], senseTable : Array[Int],  vocabSize : Int) : Array[Int] = {
+  private def getNegSamples(numNeg: Int, negTable: Array[Int], senseTable: Array[Int], vocabSize: Int): Array[Int] = {
     //println("getNegSamples ... ... ...")
 
     val negSamples = new Array[Int](numNeg)
@@ -347,12 +348,12 @@ class SenseAssignment extends Serializable{
       if (negSamples(i) <= 0)
         negSamples(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
       //add sense information (assign sense randomly)
-      negSamples(i) = negSamples(i) + vocabSize*util.Random.nextInt(senseTable(negSamples(i)))
+      negSamples(i) = negSamples(i) + vocabSize * util.Random.nextInt(senseTable(negSamples(i)))
     }
     negSamples
   }
 
-  private def getNeighbors(sentence: Array[Int], wordPos: Int, window: Int) : Array[Int] = {
+  private def getNeighbors(sentence: Array[Int], wordPos: Int, window: Int): Array[Int] = {
     //println("getNeighbors ... ... ...")
 
     val neighbors = ArrayBuilder.make[Int]
@@ -362,12 +363,12 @@ class SenseAssignment extends Serializable{
     neighbors.result()
   }
 
-  private def getBestSense(word: Int, neighbors: Array[Int], negSamples: Array[Int], numSenses: Int, syn0Sense : Array[Array[Array[Float]]], syn1Sense : Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Int = {
+  private def getBestSense(word: Int, neighbors: Array[Int], negSamples: Array[Int], numSenses: Int, syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Int = {
     //println("getBestSense ... ... ...")
 
     var bestSense = -1
     var bestScore = 0.0
-    for (sense <- 0 to numSenses-1) {
+    for (sense <- 0 to numSenses - 1) {
       //println("getBestSense ... ... ..."+ "word:" +word+" sense:"+sense)
       val score = getScore(word, sense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize)
       if (bestSense == -1 || score > bestScore) {
@@ -378,7 +379,7 @@ class SenseAssignment extends Serializable{
     bestSense
   }
 
-  private def getScore(word: Int, sense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense : Array[Array[Array[Float]]], syn1Sense : Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Double = {
+  private def getScore(word: Int, sense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int): Double = {
     //println("getScore ... ... ...")
 
     var score = 0.0
@@ -394,13 +395,13 @@ class SenseAssignment extends Serializable{
         val negSense = negSample / vocabSize
         //println("getScore ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
         if (negWord != word)
-          score += math.log(1-activeFunction(syn0Sense(negWord)(negSense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
+          score += math.log(1 - activeFunction(syn0Sense(negWord)(negSense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
       }
     }
     score
   }
 
-  private def activeFunction(v0 :Array[Float], v1 :Array[Float], expTable: Array[Float], MAX_EXP: Int): Double = {
+  private def activeFunction(v0: Array[Float], v1: Array[Float], expTable: Array[Float], MAX_EXP: Int): Double = {
     //println("activeFunction ... ... ...")
 
     val vectorSize = v0.length
@@ -417,10 +418,10 @@ class SenseAssignment extends Serializable{
   }
 
   //*
-  private def learnParameters(sentence: Array[Int], hyperPara : mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense : Array[Array[Array[Float]]], syn1Sense : Array[Array[Array[Float]]]): Unit = {
+  private def learnParameters(sentence: Array[Int], hyperPara: mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]]): Unit = {
     //println("learnParameters ... ... ...")
 
-    for (wordPos <- 0 to sentence.size-1) {
+    for (wordPos <- 0 to sentence.size - 1) {
       require(hyperPara.get("numNeg").nonEmpty, "There is no hyperparameter \"numNeg\".")
       val numNeg = hyperPara.get("numNeg").get.asInstanceOf[Int]
       require(hyperPara.get("vocabSize").nonEmpty, "There is no hyperparameter \"vocabSize\".")
@@ -436,11 +437,11 @@ class SenseAssignment extends Serializable{
       val neighbors = getNeighbors(sentence, wordPos, window)
       val wordWithSense = sentence(wordPos)
 
-      learn(wordWithSense,neighbors,negSamples,syn0Sense,syn1Sense,expTable,MAX_EXP,vocabSize,alpha)
+      learn(wordWithSense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, vocabSize, alpha)
     }
   }
 
-  private def learn(wordWithSense: Int,neighbors: Array[Int],negSamples: Array[Int],syn0Sense:Array[Array[Array[Float]]],syn1Sense:Array[Array[Array[Float]]],expTable: Array[Float], MAX_EXP: Int, vocabSize: Int, alpha: Float): Unit = {
+  private def learn(wordWithSense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, vocabSize: Int, alpha: Float): Unit = {
     //println("learn ... ... ...")
 
     val word = wordWithSense % vocabSize
@@ -454,7 +455,7 @@ class SenseAssignment extends Serializable{
       //println("learn ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
       val neu0e = new Array[Float](vectorSize)
 
-      val g = (1-activeFunction(syn0Sense(word)(sense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
+      val g = (1 - activeFunction(syn0Sense(word)(sense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
       blas.saxpy(vectorSize, g, syn0Sense(word)(sense), 1, neu0e, 1)
       blas.saxpy(vectorSize, g, syn1Sense(neighberWord)(neighberSense), 1, syn0Sense(word)(sense), 1)
 
@@ -477,23 +478,32 @@ class SenseAssignment extends Serializable{
 
   }
 
-  def writeToFile(outputPath: String): Unit={
+  def writeToFile(outputPath: String): Unit = {
     require(learned, "parameters need to be learned. You should learn parameters.")
 
-    val file1 = new PrintWriter(new File(outputPath+"/wordSense.txt"))
-    val file2 = new PrintWriter(new File(outputPath+"/syn0Sense.txt"))
-    val file3 = new PrintWriter(new File(outputPath+"/syn1Sense.txt"))
+    val file1 = new PrintWriter(new File(outputPath + "/wordSense.txt"))
+    val file2 = new PrintWriter(new File(outputPath + "/syn0Sense.txt"))
+    val file3 = new PrintWriter(new File(outputPath + "/syn1Sense.txt"))
+    val file4 = new PrintWriter(new File(outputPath + "/vectorsSense.txt"))
+
 
     val wordIndex = vocabHash.toArray.sortWith((a, b) => a._2 < b._2)
 
-    for ((wordString,word) <- wordIndex)
-      for (sense <- 0 to senseTable(word)-1) {
+    file4.write(vocabSize+" "+vectorSize+"\n")
+    for ((wordString, word) <- wordIndex) {
+      file4.write(wordString)
+      for (sense <- 0 to senseTable(word) - 1) {
         file1.write(wordString + "_" + sense + "\n")
         //println(wordString + "_" + sense + " " + word)
+        for (i <- 0 to vectorSize - 1)
+          file4.write(" "+syn0Sense(word)(sense)(i))
+        file4.write("\n")
       }
+    }
 
-    for (word <- 0 to vocabSize-1)
-      for (sense <- 0 to senseTable(word)-1) {
+
+    for (word <- 0 to vocabSize - 1) {
+      for (sense <- 0 to senseTable(word) - 1) {
         for (i <- 0 to vectorSize - 1) {
           file2.write(syn0Sense(word)(sense)(i) + " ")
           file3.write(syn1Sense(word)(sense)(i) + " ")
@@ -501,11 +511,17 @@ class SenseAssignment extends Serializable{
         file2.write("\n")
         file3.write("\n")
       }
+    }
 
     file1.close()
     file2.close()
     file3.close()
+    file4.close()
   }
+
+}
+
+object SenseAssignment {
 
   def loadModelSenses(path: String): Word2VecModel = {
     val wordIndex = collection.mutable.Map[String, Int]()
@@ -517,6 +533,5 @@ class SenseAssignment extends Serializable{
     val wordVectors = Source.fromFile(path+"/syn0Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
-
 
 }

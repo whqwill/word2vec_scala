@@ -5,9 +5,8 @@ package haiqing.word2vec
  */
 object testSenseVectors {
   def main(args: Array[String]): Unit = {
-    val senseModel = new SenseAssignment
 
-    val model = senseModel.loadModelSenses(args(0))
+    val model = SenseAssignment.loadModelSenses(args(0))
     //val model = Processing.loadTmpModel("./data_new",2000)
 
     val synonyms = model.findSynonyms(args(1), 20)
