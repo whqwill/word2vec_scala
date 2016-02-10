@@ -666,6 +666,9 @@ class Sence2Vec extends Serializable{
     var alpha = learningRate
     val syn0Global = new Array[Array[Float]](vocabSize)
     val syn1Global = new Array[Array[Float]](vocabSize)
+
+    util.Random.setSeed(42)
+
     for (a <- 0 to vocabSize-1) {
       syn0Global(a) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
       syn1Global(a) = new Array[Float](vectorSize)

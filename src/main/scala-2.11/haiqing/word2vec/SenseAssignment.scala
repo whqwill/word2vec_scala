@@ -96,7 +96,8 @@ class SenseAssignment extends Serializable {
     for (a <- 0 to vocabSize - 1) {
       vocabHash += vocab(a).word -> a
       totalWords += vocab(a).cn
-
+      if (vocab(a).word == "day")
+        println(vocab(a).toString)
     }
 
     var multiSenseWords = 0
@@ -104,7 +105,7 @@ class SenseAssignment extends Serializable {
 
     println("print some words in vocabulary: ")
     for (a <- 0 to vocabSize - 1) {
-      if (vocab(a).cn > totalWords / vocabSize) {
+      if (vocab(a).cn > totalWords / vocabSize /10) {
         senseTable(a) = 2
         multiSenseWords += 1
       }
@@ -201,8 +202,10 @@ class SenseAssignment extends Serializable {
 
   //initialize from normal skip-gram model
   def initializeParameters(synPath: String, vectorSize: Int): Unit = {
-    val syn0 = Source.fromFile(synPath + "/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
-    val syn1 = Source.fromFile(synPath + "/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
+
+
+    val syn0 = Source.fromFile(synPath + "/syn0Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
+    val syn1 = Source.fromFile(synPath + "/syn1Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
 
     require(vectorSize * vocabSize == syn0.size, "syn0.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn0 file is correct.")
     require(vectorSize * vocabSize == syn1.size, "syn1.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn1 file is correct.")
@@ -215,8 +218,11 @@ class SenseAssignment extends Serializable {
       syn0Sense(word) = new Array[Array[Float]](senseTable(word))
       syn1Sense(word) = new Array[Array[Float]](senseTable(word))
 
+
       for (sense <- 0 to senseTable(word) - 1) {
 
+        syn0Sense(word)(sense) = new Array[Float](vectorSize)
+        syn1Sense(word)(sense) = new Array[Float](vectorSize)
         for (i <- 0 to vectorSize - 1) {
           syn0Sense(word)(sense)(i) = syn0(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
           syn1Sense(word)(sense)(i) = syn1(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
@@ -229,6 +235,8 @@ class SenseAssignment extends Serializable {
 
   //initialize randomly
   def initializeParameters(vectorSize: Int = 100): Unit = {
+
+    util.Random.setSeed(42)
 
     syn0Sense = new Array[Array[Array[Float]]](vocabSize)
     syn1Sense = new Array[Array[Array[Float]]](vocabSize)
@@ -255,8 +263,6 @@ class SenseAssignment extends Serializable {
 
     val sc = sentencesSplit(0).context
 
-
-
     val totalInterations = numEpochs * numRDDs
 
     val bcSyn0Sense = sc.broadcast(syn0Sense)
@@ -277,7 +283,7 @@ class SenseAssignment extends Serializable {
 
     for (iteration <- 1 to totalInterations) {
 
-      var alpha = learningRate * (1 - iteration * 1.0f / totalInterations)
+      var alpha = learningRate * (1 - (iteration-1) * 1.0f / totalInterations)
       if (alpha < learningRate * 0.0001f)
         alpha = learningRate * 0.0001f
 
@@ -285,7 +291,7 @@ class SenseAssignment extends Serializable {
       hyperPara.put("alpha", alpha)
       val bcHyperPara = sc.broadcast(hyperPara)
 
-      val indexRDD = iteration % numRDDs
+      val indexRDD = (iteration-1) % numRDDs
 
       println("iteration = " + iteration + "   indexRDD = " + indexRDD + "   alpha = " + alpha)
 
@@ -388,14 +394,14 @@ class SenseAssignment extends Serializable {
       val neighberWord = neighber % vocabSize
       val neighberSense = neighber / vocabSize
       //println("getScore ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
-      score += math.log(activeFunction(syn0Sense(word)(sense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
+      score += math.log(activeFunction(syn1Sense(word)(sense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
 
       for (negSample <- negSamples) {
         val negWord = negSample % vocabSize
         val negSense = negSample / vocabSize
         //println("getScore ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
         if (negWord != word)
-          score += math.log(1 - activeFunction(syn0Sense(negWord)(negSense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
+          score += math.log(1 - activeFunction(syn1Sense(negWord)(negSense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
       }
     }
     score
@@ -453,11 +459,11 @@ class SenseAssignment extends Serializable {
       val neighberWord = neighbor % vocabSize
       val neighberSense = neighbor / vocabSize
       //println("learn ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
-      val neu0e = new Array[Float](vectorSize)
+      val neu1e = new Array[Float](vectorSize)
 
-      val g = (1 - activeFunction(syn0Sense(word)(sense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
-      blas.saxpy(vectorSize, g, syn0Sense(word)(sense), 1, neu0e, 1)
-      blas.saxpy(vectorSize, g, syn1Sense(neighberWord)(neighberSense), 1, syn0Sense(word)(sense), 1)
+      val g = (1 - activeFunction(syn1Sense(word)(sense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
+      blas.saxpy(vectorSize, g, syn1Sense(word)(sense), 1, neu1e, 1)
+      blas.saxpy(vectorSize, g, syn0Sense(neighberWord)(neighberSense), 1, syn1Sense(word)(sense), 1)
 
       for (negSample <- negSamples) {
 
@@ -466,14 +472,14 @@ class SenseAssignment extends Serializable {
         //println("learn ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
         if (negWord != word) {
 
-          val g = (-activeFunction(syn0Sense(negWord)(negSense), syn1Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
-          blas.saxpy(vectorSize, g, syn0Sense(negWord)(negSense), 1, neu0e, 1)
-          blas.saxpy(vectorSize, g, syn1Sense(neighberWord)(neighberSense), 1, syn0Sense(negWord)(negSense), 1)
+          val g = (-activeFunction(syn1Sense(negWord)(negSense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
+          blas.saxpy(vectorSize, g, syn1Sense(negWord)(negSense), 1, neu1e, 1)
+          blas.saxpy(vectorSize, g, syn0Sense(neighberWord)(neighberSense), 1, syn1Sense(negWord)(negSense), 1)
         }
 
       }
 
-      blas.saxpy(vectorSize, g, neu0e, 1, syn1Sense(neighberWord)(neighberSense), 1)
+      blas.saxpy(vectorSize, g, neu1e, 1, syn0Sense(neighberWord)(neighberSense), 1)
     }
 
   }
