@@ -4,6 +4,8 @@ import java.io._
 
 import com.github.fommil.netlib.BLAS._
 import org.apache.spark.broadcast.Broadcast
+
+import scala.compat.Platform._
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
@@ -51,7 +53,6 @@ class SenseAssignment extends Serializable {
     table
   }
 
-
   private var vocabSize = 0
   private var vocab: Array[VocabWord] = null
   private var vocabHash = mutable.HashMap.empty[String, Int]
@@ -66,20 +67,123 @@ class SenseAssignment extends Serializable {
   private var syn1Sense: Array[Array[Array[Float]]] = null
   private var vectorSize = 0
   private var learned = false
+  private var multiSense = false
 
-  def loadData(input: RDD[String]): Unit = {
+  def TrainOneSense(input: RDD[String], minCount: Int = 5, maxSentenceLength: Int = 3000, numSentencesPerIterPerCore: Int = 5, vectorSize: Int = 100, numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong(), outputPath: String): Unit = {
+    val startTime = currentTime
+    var oldTime = startTime
+
+    multiSense = false
+
+    println("load data ... ... ...")
+    loadData(input)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("preprocess data ... ... ...")
+    preprocessData()
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("learn vocabulary without sense ... ...  ...")
+    learnVocabWithoutSense(minCount)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("make sentences ... ... ...")
+    makeSentences(maxSentenceLength)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("split RDD ... ... ...")
+    splitRDD(numSentencesPerIterPerCore)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("initialize parameters ... ... ...")
+    initializeParameters(vectorSize)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("train (local version) ... ... ...")
+    train_local(numEpochs,window,numNeg,learningRate,seed)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("wrote to file ... ... ...")
+    writeToFile(outputPath)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("total time:"+(currentTime-startTime)/1000.0)
+  }
+
+  def TrainTwoSenses(input: RDD[String], minCount: Int = 5, maxSentenceLength: Int = 3000, numSentencesPerIterPerCore: Int = 5, vectorSize: Int = 100, numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong(), synPath: String, outputPath: String): Unit = {
+    val startTime = currentTime
+    var oldTime = startTime
+
+    multiSense = true
+
+    println("load data ... ... ...")
+    loadData(input)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("preprocess data ... ... ...")
+    preprocessData()
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("learn vocabulary without sense ... ... ...")
+    learnVocab(minCount)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("make sentences ... ... ...")
+    makeSentences(maxSentenceLength)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("split RDD ... ... ...")
+    splitRDD(numSentencesPerIterPerCore)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("initialize parameters ... ... ...")
+    initializeParameters(synPath,vectorSize)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("train (local version) ... ... ...")
+    train_local(numEpochs,window,numNeg,learningRate,seed)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("wrote to file ... ... ...")
+    writeToFile(outputPath)
+    println("time:" + (currentTime - oldTime) / 1000.0)
+    oldTime = currentTime
+
+    println("total time:"+(currentTime-startTime)/1000.0)
+  }
+
+  def TrainMultipleSenses(): Unit = {
+
+  }
+
+  private def loadData(input: RDD[String]): Unit = {
     words = input.map(line => line.split(" ").toSeq).flatMap(x => x).cache()
     words.count()
   }
 
-  def preprocessData(): Unit = {
+  private def preprocessData(): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.")
     words = words.map(x => x.toLowerCase).filter(x => x.size > 0).filter(x => x.size > 1 || x(0).isLetter || x(0).isDigit).cache()
     words.count()
     println("words.count()=" + words.count())
   }
 
-  def learnVocab(minCount: Int = 5): Unit = {
+  private def learnVocab(minCount: Int): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.d")
     vocab = words.map(w => (w, 1))
       .reduceByKey(_ + _)
@@ -120,7 +224,7 @@ class SenseAssignment extends Serializable {
     println("totalWords = " + totalWords)
   }
 
-  def learnVocabWithoutSense(minCount: Int = 5): Unit = {
+  private def learnVocabWithoutSense(minCount: Int): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.d")
     vocab = words.map(w => (w, 1))
       .reduceByKey(_ + _)
@@ -154,11 +258,9 @@ class SenseAssignment extends Serializable {
     println("totalWords = " + totalWords)
   }
 
-  def makeSentences(maxSentenceLength: Int = 3000): Unit = {
+  private def makeSentences(maxSentenceLength: Int): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.")
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check if learning vocabulary correctly.")
-
-
 
     val sc = words.context
     val bcVacabHash = sc.broadcast(vocabHash)
@@ -187,7 +289,7 @@ class SenseAssignment extends Serializable {
     println("totalSentences = " + totalSentences)
   }
 
-  def splitRDD(numSentencesPerIterPerCore: Int = 5): Unit = {
+  private def splitRDD(numSentencesPerIterPerCore: Int): Unit = {
     require(totalSentences > 0, "The number of sentences should be > 0. You may need to check if making sentences correctly.")
 
     val sc = words.context
@@ -201,7 +303,7 @@ class SenseAssignment extends Serializable {
   }
 
   //initialize from normal skip-gram model
-  def initializeParameters(synPath: String, vectorSize: Int): Unit = {
+  private def initializeParameters(synPath: String, vectorSize: Int): Unit = {
 
 
     val syn0 = Source.fromFile(synPath + "/syn0Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
@@ -234,7 +336,7 @@ class SenseAssignment extends Serializable {
   }
 
   //initialize randomly
-  def initializeParameters(vectorSize: Int = 100): Unit = {
+  private def initializeParameters(vectorSize: Int = 100): Unit = {
 
     util.Random.setSeed(42)
 
@@ -256,7 +358,7 @@ class SenseAssignment extends Serializable {
     this.vectorSize = vectorSize
   }
 
-  def train_local(numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong()): Unit = {
+  private def train_local(numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong()): Unit = {
     require(sentencesSplit.size > 0, "The number of sentences RDD should be > 0. You may need to check if splitting RDD correctly.")
     require(syn0Sense != null, "syn0Sense should not be null. You may need to check if initializing parameters correctly.")
     require(syn1Sense != null, "syn1Sense should not be null. You may need to check if initializing parameters correctly.")
@@ -295,19 +397,20 @@ class SenseAssignment extends Serializable {
 
       println("iteration = " + iteration + "   indexRDD = " + indexRDD + "   alpha = " + alpha)
 
+      if (multiSense) {
+        for (k <- 1 to 5) {
+          println("k=" + k)
+          sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitions { sentenceIter =>
 
-      for (k <- 1 to 5) {
-        println("k="+k)
-        sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitions { sentenceIter =>
-
-          //println("mapPartitions ... ... ...")
-          val newSentenceIter = mutable.MutableList[Array[Int]]()
-          for (sentence <- sentenceIter) {
-            val newSentence = adjustAssignment(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
-            newSentenceIter += newSentence
-          }
-          newSentenceIter.toIterator
-        }.cache()
+            //println("mapPartitions ... ... ...")
+            val newSentenceIter = mutable.MutableList[Array[Int]]()
+            for (sentence <- sentenceIter) {
+              val newSentence = adjustAssignment(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
+              newSentenceIter += newSentence
+            }
+            newSentenceIter.toIterator
+          }.cache()
+        }
       }
 
       sentencesSplit(indexRDD).foreachPartition { sentencesIterator =>
@@ -487,7 +590,7 @@ class SenseAssignment extends Serializable {
 
   }
 
-  def writeToFile(outputPath: String): Unit = {
+  private def writeToFile(outputPath: String): Unit = {
     require(learned, "parameters need to be learned. You should learn parameters.")
 
     val file1 = new PrintWriter(new File(outputPath + "/wordSense.txt"))
