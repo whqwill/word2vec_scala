@@ -1,6 +1,6 @@
 package haiqing.word2vec
 
-import org.apache.spark.mllib.feature.{Word2Vec, Word2VecModel}
+import org.apache.spark.mllib.feature.{Word2Vec}
 import org.apache.spark.{SparkContext, SparkConf}
 
 import scala.compat.Platform._
@@ -20,6 +20,9 @@ object testOriginal {
 
     if (args(0) == "1")
       println(sc.textFile(args(1)).count())
+
+
+
     /*
     val in = sc.textFile(args(0),sc.defaultParallelism)
 

@@ -1,10 +1,6 @@
 package haiqing.word2vec
 
 import java.io._
-
-import com.github.fommil.netlib.BLAS._
-import org.apache.spark.broadcast.Broadcast
-
 import scala.compat.Platform._
 import org.apache.spark.rdd.RDD
 
@@ -16,6 +12,60 @@ import com.github.fommil.netlib.BLAS.{getInstance => blas}
  * Created by hwang on 09.02.16.
  */
 class SenseAssignment extends Serializable {
+
+  private var vectorSize = 100
+  private var minCount = 5
+  private var iterations = 2
+  private var window = 5
+  private var negative = 5
+  private var learningRate = 0.025f
+  private var seed = 42l
+  private var numRDDs = 5
+  private var maxAdjusting = 10
+  private var local = false
+
+
+  def setVectorSize(vectorSize: Int): this.type = {
+    this.vectorSize = vectorSize
+    this
+  }
+  def setMinCount(minCount: Int): this.type = {
+    this.minCount = minCount
+    this
+  }
+  def setIterations(iterations: Int): this.type = {
+    this.iterations = iterations
+    this
+  }
+  def setWindow(window: Int): this.type = {
+    this.window = window
+    this
+  }
+  def setNegative(negative: Int): this.type = {
+    this.negative = negative
+    this
+  }
+  def setLearningRate(learningRate: Int): this.type = {
+    this.learningRate = learningRate
+    this
+  }
+  def setSeed(seed: Long): this.type = {
+    this.seed = seed
+    this
+  }
+  def setNumRDDs(numRDDs: Int): this.type = {
+    this.numRDDs = numRDDs
+    this
+  }
+  def setMaxAdjusting(maxAdjusting: Int): this.type = {
+    this.maxAdjusting = maxAdjusting
+    this
+  }
+  def setLocal(local: Boolean): this.type = {
+    this.local = local
+    this
+  }
+
 
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
@@ -33,8 +83,7 @@ class SenseAssignment extends Serializable {
     }
     expTable
   }
-
-  private def makeNegativaSampleTable(): Array[Int] = {
+  private def createNegTable(): Array[Int] = {
     val table = new Array[Int](TABEL_SIZE)
     var trainWordsPow = 0.0
     for (a <- 0 to vocabSize - 1)
@@ -57,56 +106,42 @@ class SenseAssignment extends Serializable {
   private var vocab: Array[VocabWord] = null
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var senseTable: Array[Int] = null
-  private var words: RDD[String] = null
   private var totalWords = 0
   private var sentences: RDD[Array[Int]] = null
   private var totalSentences = 0
-  private var numRDDs = 0
-  private var sentencesSplit: Array[RDD[Array[Int]]] = null
-  private var syn0Sense: Array[Array[Array[Float]]] = null
-  private var syn1Sense: Array[Array[Array[Float]]] = null
-  private var vectorSize = 0
+  private var syn0: Array[Array[Array[Float]]] = null
+  private var syn1: Array[Array[Array[Float]]] = null
   private var learned = false
   private var multiSense = false
 
-  def TrainOneSense(input: RDD[String], minCount: Int = 5, maxSentenceLength: Int = 3000, numSentencesPerIterPerCore: Int = 5, vectorSize: Int = 100, numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong(), outputPath: String): Unit = {
+  def TrainOneSense(input: RDD[String], outputPath: String): Unit = {
     val startTime = currentTime
     var oldTime = startTime
 
     multiSense = false
 
-    println("load data ... ... ...")
-    loadData(input)
-    println("time:"+(currentTime-oldTime)/1000.0)
+    println("learn vocabulary ... ...  ...")
+    learnVocab(input)
+    println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
-    println("preprocess data ... ... ...")
-    preprocessData()
-    println("time:"+(currentTime-oldTime)/1000.0)
-    oldTime = currentTime
-
-    println("learn vocabulary without sense ... ...  ...")
-    learnVocabWithoutSense(minCount)
+    println("create Sense Table ... ... ...")
+    createSenseTable
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
     println("make sentences ... ... ...")
-    makeSentences(maxSentenceLength)
-    println("time:"+(currentTime-oldTime)/1000.0)
-    oldTime = currentTime
-
-    println("split RDD ... ... ...")
-    splitRDD(numSentencesPerIterPerCore)
+    makeSentences(input)
     println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
     println("initialize parameters ... ... ...")
-    initializeParameters(vectorSize)
+    initSyn
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
     println("train (local version) ... ... ...")
-    train_local(numEpochs,window,numNeg,learningRate,seed)
+    train_local
     println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
@@ -118,44 +153,34 @@ class SenseAssignment extends Serializable {
     println("total time:"+(currentTime-startTime)/1000.0)
   }
 
-  def TrainTwoSenses(input: RDD[String], minCount: Int = 5, maxSentenceLength: Int = 3000, numSentencesPerIterPerCore: Int = 5, vectorSize: Int = 100, numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong(), synPath: String, outputPath: String): Unit = {
+  def TrainTwoSenses(input: RDD[String], synPath: String, outputPath: String): Unit = {
     val startTime = currentTime
     var oldTime = startTime
 
     multiSense = true
 
-    println("load data ... ... ...")
-    loadData(input)
-    println("time:"+(currentTime-oldTime)/1000.0)
+    println("learn vocabulary ... ...  ...")
+    learnVocab(input)
+    println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
-    println("preprocess data ... ... ...")
-    preprocessData()
-    println("time:"+(currentTime-oldTime)/1000.0)
-    oldTime = currentTime
-
-    println("learn vocabulary without sense ... ... ...")
-    learnVocab(minCount)
+    println("create Sense Table ... ... ...")
+    createSenseTable(1000)
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
     println("make sentences ... ... ...")
-    makeSentences(maxSentenceLength)
-    println("time:"+(currentTime-oldTime)/1000.0)
-    oldTime = currentTime
-
-    println("split RDD ... ... ...")
-    splitRDD(numSentencesPerIterPerCore)
+    makeSentences(input)
     println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
     println("initialize parameters ... ... ...")
-    initializeParameters(synPath,vectorSize)
+    initSyn(synPath)
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
     println("train (local version) ... ... ...")
-    train_local(numEpochs,window,numNeg,learningRate,seed)
+    train_local
     println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
@@ -171,19 +196,17 @@ class SenseAssignment extends Serializable {
 
   }
 
-  private def loadData(input: RDD[String]): Unit = {
-    words = input.map(line => line.split(" ").toSeq).flatMap(x => x).cache()
-    words.count()
-  }
+  private def learnVocab(input: RDD[String]): Unit = {
+    val words = input.map(line => line.split(" ").array).flatMap(x=>x).filter(x=>x.size>0).map{x=>
+      var begin = 0;
+      var end = x.size-1;
+      while(begin <= end && !x(begin).isLetter)
+        begin+=1
+      while(begin <= end && !x(end).isLetter)
+        end-=1
+      x.substring(begin,end+1)
+    }.filter(x=>x.size>0)
 
-  private def preprocessData(): Unit = {
-    require(words != null, "words RDD is null. You may need to check if loading data correctly.")
-    words = words.map(x => x.toLowerCase).filter(x => x.size > 0).filter(x => x.size > 1 || x(0).isLetter || x(0).isDigit).cache()
-    words.count()
-    println("words.count()=" + words.count())
-  }
-
-  private def learnVocab(minCount: Int): Unit = {
     require(words != null, "words RDD is null. You may need to check if loading data correctly.d")
     vocab = words.map(w => (w, 1))
       .reduceByKey(_ + _)
@@ -200,51 +223,14 @@ class SenseAssignment extends Serializable {
     for (a <- 0 to vocabSize - 1) {
       vocabHash += vocab(a).word -> a
       totalWords += vocab(a).cn
-      if (vocab(a).word == "day")
-        println(vocab(a).toString)
     }
 
-    var multiSenseWords = 0
-    senseTable = new Array[Int](vocabSize)
-
-    println("print some words in vocabulary: ")
-    for (a <- 0 to vocabSize - 1) {
-      if (vocab(a).cn > totalWords / vocabSize /10) {
-        senseTable(a) = 2
-        multiSenseWords += 1
-      }
-      else
-        senseTable(a) = 1
-      if (util.Random.nextInt(vocabSize) < 30)
-        println(vocab(a).toString + "  numSenses:" + senseTable(a))
-    }
-
-    println("multiSenseWords = " + multiSenseWords)
     println("vocabSize = " + vocabSize)
     println("totalWords = " + totalWords)
   }
 
-  private def learnVocabWithoutSense(minCount: Int): Unit = {
-    require(words != null, "words RDD is null. You may need to check if loading data correctly.d")
-    vocab = words.map(w => (w, 1))
-      .reduceByKey(_ + _)
-      .map(x => VocabWord(
-        x._1,
-        x._2))
-      .filter(_.cn >= minCount)
-      .collect()
-      .sortWith((a, b) => a.cn > b.cn)
-    vocabSize = vocab.length
-    require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
-      "the setting of minCount, which could be large enough to remove all your words in sentences.")
-
-    println(vocabSize)
-    for (a <- 0 to vocabSize - 1) {
-      vocabHash += vocab(a).word -> a
-      totalWords += vocab(a).cn
-
-    }
-
+  //one sense
+  private def createSenseTable(): Unit = {
     senseTable = new Array[Int](vocabSize)
 
     println("print some words in vocabulary: ")
@@ -253,35 +239,45 @@ class SenseAssignment extends Serializable {
       if (util.Random.nextInt(vocabSize) < 30)
         println(vocab(a).toString + "  numSenses:" + senseTable(a))
     }
-
-    println("vocabSize = " + vocabSize)
-    println("totalWords = " + totalWords)
   }
 
-  private def makeSentences(maxSentenceLength: Int): Unit = {
-    require(words != null, "words RDD is null. You may need to check if loading data correctly.")
+  //two senses
+  private def createSenseTable(count: Int): Unit = {
+    senseTable = new Array[Int](vocabSize)
+
+    println("print some words in vocabulary: ")
+    for (a <- 0 to vocabSize - 1) {
+      if (vocab(a).cn < count)
+        senseTable(a) = 1
+      else
+        senseTable(a) = 2
+      if (util.Random.nextInt(vocabSize) < 30)
+        println(vocab(a).toString + "  numSenses:" + senseTable(a))
+      if (vocab(a).word == "day")
+        println(vocab(a).toString + "  numSenses:" + senseTable(a))
+    }
+
+  }
+
+  private def makeSentences(input: RDD[String]): Unit = {
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check if learning vocabulary correctly.")
 
-    val sc = words.context
+    val sc = input.context
     val bcVacabHash = sc.broadcast(vocabHash)
     val bcNumSensesTable = sc.broadcast(senseTable)
 
-    sentences = words.mapPartitions { iter =>
-      new Iterator[Array[Int]] {
-        def hasNext: Boolean = iter.hasNext
-
-        def next(): Array[Int] = {
-          val sentence = ArrayBuilder.make[Int]
-          var sentenceLength = 0
-          while (iter.hasNext && sentenceLength < maxSentenceLength) {
-            val word = bcVacabHash.value.get(iter.next())
-            if (word.nonEmpty) {
-              sentence += word.get * 100 + util.Random.nextInt(bcNumSensesTable.value(word.get))
-              sentenceLength += 1
-            }
-          }
-          sentence.result()
-        }
+    sentences = input.map(line => line.split(" ").array).map{sentence=>
+      sentence.filter(x=>x.size>0).map{x=>
+        var begin = 0;
+        var end = x.size-1;
+        while(begin <= end && !x(begin).isLetter)
+          begin+=1
+        while(begin <= end && !x(end).isLetter)
+          end-=1
+        x.substring(begin,end+1)
+      }.filter(x=>x.size>0&&bcVacabHash.value.get(x).nonEmpty).map{x=>
+        val word = bcVacabHash.value.get(x).get
+        word*100+util.Random.nextInt(bcNumSensesTable.value(word))
       }
     }.cache()
 
@@ -289,45 +285,32 @@ class SenseAssignment extends Serializable {
     println("totalSentences = " + totalSentences)
   }
 
-  private def splitRDD(numSentencesPerIterPerCore: Int): Unit = {
-    require(totalSentences > 0, "The number of sentences should be > 0. You may need to check if making sentences correctly.")
-
-    val sc = words.context
-    val numCores = sc.defaultParallelism
-    val numSentencesPerIter = numSentencesPerIterPerCore * numCores
-    numRDDs = totalSentences / numSentencesPerIter
-    sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x => x + 1))
-
-    println("numSentencesPerIter = " + numSentencesPerIter)
-    println("numRDDs = " + numRDDs)
-  }
-
   //initialize from normal skip-gram model
-  private def initializeParameters(synPath: String, vectorSize: Int): Unit = {
+  private def initSyn(synPath: String): Unit = {
 
 
-    val syn0 = Source.fromFile(synPath + "/syn0Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
-    val syn1 = Source.fromFile(synPath + "/syn1Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
+    val syn0Old = Source.fromFile(synPath + "/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
+    val syn1Old = Source.fromFile(synPath + "/syn1.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s => s.toFloat).toArray
 
-    require(vectorSize * vocabSize == syn0.size, "syn0.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn0 file is correct.")
-    require(vectorSize * vocabSize == syn1.size, "syn1.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn1 file is correct.")
+    require(vectorSize * vocabSize == syn0Old.size, "syn0.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn0 file is correct.")
+    require(vectorSize * vocabSize == syn1Old.size, "syn1.size should be equal to vectorSize*vocabSize. You may need to check if vectorSize or vocabSize or syn1 file is correct.")
 
-    syn0Sense = new Array[Array[Array[Float]]](vocabSize)
-    syn1Sense = new Array[Array[Array[Float]]](vocabSize)
+    syn0 = new Array[Array[Array[Float]]](vocabSize)
+    syn1 = new Array[Array[Array[Float]]](vocabSize)
 
     for (word <- 0 to vocabSize - 1) {
 
-      syn0Sense(word) = new Array[Array[Float]](senseTable(word))
-      syn1Sense(word) = new Array[Array[Float]](senseTable(word))
+      syn0(word) = new Array[Array[Float]](senseTable(word))
+      syn1(word) = new Array[Array[Float]](senseTable(word))
 
 
       for (sense <- 0 to senseTable(word) - 1) {
 
-        syn0Sense(word)(sense) = new Array[Float](vectorSize)
-        syn1Sense(word)(sense) = new Array[Float](vectorSize)
+        syn0(word)(sense) = new Array[Float](vectorSize)
+        syn1(word)(sense) = new Array[Float](vectorSize)
         for (i <- 0 to vectorSize - 1) {
-          syn0Sense(word)(sense)(i) = syn0(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
-          syn1Sense(word)(sense)(i) = syn1(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn0(word)(sense)(i) = syn0Old(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
+          syn1(word)(sense)(i) = syn1Old(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
         }
       }
     }
@@ -336,186 +319,225 @@ class SenseAssignment extends Serializable {
   }
 
   //initialize randomly
-  private def initializeParameters(vectorSize: Int = 100): Unit = {
+  private def initSyn: Unit = {
 
-    util.Random.setSeed(42)
-
-    syn0Sense = new Array[Array[Array[Float]]](vocabSize)
-    syn1Sense = new Array[Array[Array[Float]]](vocabSize)
+    syn0 = new Array[Array[Array[Float]]](vocabSize)
+    syn1 = new Array[Array[Array[Float]]](vocabSize)
 
     for (word <- 0 to vocabSize - 1) {
 
-      syn0Sense(word) = new Array[Array[Float]](senseTable(word))
-      syn1Sense(word) = new Array[Array[Float]](senseTable(word))
+      syn0(word) = new Array[Array[Float]](senseTable(word))
+      syn1(word) = new Array[Array[Float]](senseTable(word))
 
       for (sense <- 0 to senseTable(word) - 1) {
 
-        syn0Sense(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
-        syn1Sense(word)(sense) = new Array[Float](vectorSize)
+        syn0(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
+        syn1(word)(sense) = new Array[Float](vectorSize)
       }
     }
 
     this.vectorSize = vectorSize
   }
 
-  private def train_local(numEpochs: Int = 2, window: Int = 5, numNeg: Int = 5, learningRate: Float = 0.025f, seed: Long = util.Random.nextLong()): Unit = {
-    require(sentencesSplit.size > 0, "The number of sentences RDD should be > 0. You may need to check if splitting RDD correctly.")
-    require(syn0Sense != null, "syn0Sense should not be null. You may need to check if initializing parameters correctly.")
-    require(syn1Sense != null, "syn1Sense should not be null. You may need to check if initializing parameters correctly.")
+  private def train_local: Unit = {
+    require(syn0 != null, "syn0 should not be null. You may need to check if initializing parameters correctly.")
+    require(syn1 != null, "syn1 should not be null. You may need to check if initializing parameters correctly.")
 
-    val sc = sentencesSplit(0).context
+    val sc = sentences.context
+    val sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x=>x+1.0))
 
-    val totalInterations = numEpochs * numRDDs
+    var totalWordCount = 0
+    val totalTrainWords = totalWords*iterations
+    val totalIterations = iterations * numRDDs
 
-    val bcSyn0Sense = sc.broadcast(syn0Sense)
-    val bcSyn1Sense = sc.broadcast(syn1Sense)
-
-    val bcExpTable = sc.broadcast(createExpTable())
-    val bcNegTable = sc.broadcast(makeNegativaSampleTable())
+    val bcSyn0 = sc.broadcast(syn0)
+    val bcSyn1 = sc.broadcast(syn1)
+    val bcExpTable = sc.broadcast(createExpTable)
+    val bcNegTable = sc.broadcast(createNegTable)
     val bcSenseTable = sc.broadcast(senseTable)
 
-    val hyperPara = mutable.HashMap[String, AnyVal]()
-    hyperPara.put("window", window)
-    hyperPara.put("numNeg", numNeg)
-    hyperPara.put("learningRate", learningRate)
-    hyperPara.put("seed", seed)
-    hyperPara.put("vocabSize", vocabSize)
-    hyperPara.put("vectorSize", vectorSize)
-    hyperPara.put("MAX_EXP", MAX_EXP)
+    for (k <- 1 to totalIterations) {
 
-    for (iteration <- 1 to totalInterations) {
+      val indexRDD = (k-1) % numRDDs
+      println("iteration = " + k + "   indexRDD = " + indexRDD)
 
-      var alpha = learningRate * (1 - (iteration-1) * 1.0f / totalInterations)
-      if (alpha < learningRate * 0.0001f)
-        alpha = learningRate * 0.0001f
+      //adjust sense assignment
+      if (multiSense)
+        sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
+          util.Random.setSeed(seed*idx+k)
+          val syn0 = bcSyn0.value
+          val syn1 = bcSyn1.value
+          val senseTable = bcSenseTable.value
+          val expTable = bcExpTable.value
+          val negTable = bcNegTable.value
 
-      hyperPara.put("iteration", iteration)
-      hyperPara.put("alpha", alpha)
-      val bcHyperPara = sc.broadcast(hyperPara)
+          var sumT = 0
 
-      val indexRDD = (iteration-1) % numRDDs
+          val newIter = mutable.MutableList[Array[Int]]()
+          for (sentence <- iter) {
+            var t = 1
+            while (adjustSentence(sentence,expTable,negTable,senseTable,syn0,syn1) && t < maxAdjusting)
+              t+=1
+            newIter+=sentence
+            sumT += t
+          }
 
-      println("iteration = " + iteration + "   indexRDD = " + indexRDD + "   alpha = " + alpha)
+          println("total sentence iterations:"+sumT+ ",   number of sentences:"+newIter.size + ",   iterations per sentence:" + sumT*1.0/newIter.size)
+          newIter.toIterator
+        }.cache()
 
-      if (multiSense) {
-        for (k <- 1 to 5) {
-          println("k=" + k)
-          sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitions { sentenceIter =>
 
-            //println("mapPartitions ... ... ...")
-            val newSentenceIter = mutable.MutableList[Array[Int]]()
-            for (sentence <- sentenceIter) {
-              val newSentence = adjustAssignment(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
-              newSentenceIter += newSentence
-            }
-            newSentenceIter.toIterator
-          }.cache()
+      val accWordCount = sc.accumulator(0)
+      val numPartitions = sc.defaultParallelism
+
+
+      //learn syn0 and syn1
+      val tmpRDD = sentencesSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
+        util.Random.setSeed(seed*idx+k)
+        val syn0Local = bcSyn0.value
+        val syn1Local = bcSyn1.value
+        val senseTable = bcSenseTable.value
+        val expTable = bcExpTable.value
+        val negTable = bcNegTable.value
+        val syn0Modify = new mutable.HashMap[Int,Boolean]
+        val syn1Modify = new mutable.HashMap[Int,Boolean]
+
+        var startTime = currentTime
+        var lastWordCount = 0
+        var wordCount = 0
+        var alpha = learningRate * (1 - totalWordCount * 1.0f / totalTrainWords )
+        if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
+
+        for (sentence <- iter) {
+          if (wordCount - lastWordCount > 10000) {
+            var alpha = learningRate * (1 - (totalWordCount*1.0+wordCount*numPartitions) / totalTrainWords )
+            if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
+            println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
+            lastWordCount = wordCount
+            startTime = currentTime
+          }
+
+          for (pos <- 0 to sentence.size-1) {
+            val w = sentence(pos)
+            val neighbors = getNeighbors(sentence, pos, window)
+            val negSamples = getNegSamples(negTable,senseTable)
+            learn(w,neighbors,negSamples,syn0Local,syn1Local,syn0Modify,syn1Modify,expTable,alpha)
+          }
+
+          wordCount += sentence.size
+        }
+
+        accWordCount += wordCount
+
+        val synIter = mutable.MutableList[(Int,Array[Float])]()
+        for ((index,nothing)<-syn0Modify)
+          synIter += index->syn0Local(index/100)(index%100)
+        for ((index,nothing)<-syn1Modify)
+          synIter += index->syn1Local(index/100)(index%100)
+
+        println("partition "+ idx+ ",  synIter.size = " + synIter.size)
+
+        synIter.toIterator
+
+      }.cache()
+
+
+      //update syn0 and syn1
+      val synUpdate = tmpRDD.reduceByKey{(a,b)=>
+        blas.saxpy(vectorSize, 1.0f, b, 1, a, 1)
+        a
+      }.collect()
+
+      if (local) {
+        tmpRDD.count()
+      }
+      else {
+        val synCount = tmpRDD.countByKey()
+        val zero = new Array[Float](vectorSize)
+        for ((index, update) <- synUpdate) {
+          val count = synCount(index)
+          if (index / 100 < vocabSize) {
+            blas.scopy(vectorSize, zero, 1, syn0(index / 100)(index % 100), 1)
+            blas.saxpy(vectorSize, 1.0f / count, update, 1, syn0(index / 100)(index % 100), 1)
+          }
+          else {
+            blas.scopy(vectorSize, zero, 1, syn1(index / 100)(index % 100), 1)
+            blas.saxpy(vectorSize, 1.0f / count, update, 1, syn1(index / 100)(index % 100), 1)
+          }
         }
       }
 
-      sentencesSplit(indexRDD).foreachPartition { sentencesIterator =>
-        //println("foreachPartition ... ... ...")
-        for (sentence <- sentencesIterator)
-          learnParameters(sentence, bcHyperPara.value, bcExpTable.value, bcNegTable.value, bcSenseTable.value, bcSyn0Sense.value, bcSyn1Sense.value)
-      }
-
-      println("syn0Sense(0)(0)(0)=" + syn0Sense(0)(0)(0))
+      totalWordCount += accWordCount.value
+      println("syn0(0)(0)(0)=" + syn0(0)(0)(0))
     }
 
     learned = true
   }
 
-  //* sentence may need to be cloned
-  private def adjustAssignment(sentence: Array[Int], hyperPara: mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]]): Array[Int] = {
-    //println("adjustAssignment ... ... ...")
+  private def adjustSentence(sentence: Array[Int], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0: Array[Array[Array[Float]]], syn1: Array[Array[Array[Float]]]): Boolean = {
+    var change = false
 
-    for (wordPos <- 0 to sentence.size - 1) {
+    for (pos <- 0 to sentence.size - 1) {
 
-      require(hyperPara.get("numNeg").nonEmpty, "There is no hyperparameter \"numNeg\".")
-      val numNeg = hyperPara.get("numNeg").get.asInstanceOf[Int]
-      require(hyperPara.get("vocabSize").nonEmpty, "There is no hyperparameter \"vocabSize\".")
-      val vocabSize = hyperPara.get("vocabSize").get.asInstanceOf[Int]
-      require(hyperPara.get("window").nonEmpty, "There is no hyperparameter \"window\".")
-      val window = hyperPara.get("window").get.asInstanceOf[Int]
-      require(hyperPara.get("MAX_EXP").nonEmpty, "There is no hyperparameter \"MAX_EXP\".")
-      val MAX_EXP = hyperPara.get("MAX_EXP").get.asInstanceOf[Int]
+      val negSamples = getNegSamples(negTable, senseTable)
+      val neighbors = getNeighbors(sentence, pos, window)
+      val word = sentence(pos) / 100
 
-      val negSamples = getNegSamples(numNeg, negTable, senseTable, vocabSize)
-      val neighbors = getNeighbors(sentence, wordPos, window)
-      val word = sentence(wordPos) / 100
-      val bestSense = getBestSense(word, neighbors, negSamples, senseTable(word), syn0Sense, syn1Sense, expTable, MAX_EXP)
+      //select best score
+      var bestSense = -1  //there is no best sense
+      var bestScore = 0.0
+      for (sense <- 0 to senseTable(word)-1) {
+        val w = word*100+sense
+        val score = getScore(w,neighbors,negSamples,syn0,syn1,expTable)
+        if (bestSense == -1 || score > bestScore) {
+          bestScore = score
+          bestSense = sense
+        }
+      }
 
-      sentence(wordPos) = word * 100+ bestSense
+      if (word*100+bestSense != sentence(pos))
+        change = true
+      sentence(pos) = word*100+bestSense
     }
-    sentence
+    change
   }
 
-  private def getNegSamples(numNeg: Int, negTable: Array[Int], senseTable: Array[Int], vocabSize: Int): Array[Int] = {
-    //println("getNegSamples ... ... ...")
-
-    val negSamples = new Array[Int](numNeg)
+  private def getNegSamples(negTable: Array[Int], senseTable: Array[Int]): Array[Int] = {
+    val negSamples = new Array[Int](negative)
     val tableSize = negTable.size
-    for (i <- 0 to numNeg - 1) {
+
+    for (i <- 0 to negative - 1) {
+
       negSamples(i) = negTable(Math.abs(util.Random.nextLong() % tableSize).toInt)
       if (negSamples(i) <= 0)
         negSamples(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
+
       //add sense information (assign sense randomly)
       negSamples(i) = negSamples(i) * 100 + util.Random.nextInt(senseTable(negSamples(i)))
     }
     negSamples
   }
 
-  private def getNeighbors(sentence: Array[Int], wordPos: Int, window: Int): Array[Int] = {
-    //println("getNeighbors ... ... ...")
-
+  private def getNeighbors(sentence: Array[Int], posW: Int, window: Int): Array[Int] = {
     val neighbors = ArrayBuilder.make[Int]
-    for (pos <- wordPos - window + 1 to wordPos + window - 1)
-      if (pos >= 0 && pos < sentence.size && pos != wordPos)
-        neighbors += sentence(pos)
+    for (p <- posW - window + 1 to posW + window - 1)
+      if (p >= 0 && p < sentence.size && p != posW)
+        neighbors += sentence(p)
     neighbors.result()
   }
 
-  private def getBestSense(word: Int, neighbors: Array[Int], negSamples: Array[Int], numSenses: Int, syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int): Int = {
-    //println("getBestSense ... ... ...")
-
-    var bestSense = -1
-    var bestScore = 0.0
-    for (sense <- 0 to numSenses - 1) {
-      //println("getBestSense ... ... ..."+ "word:" +word+" sense:"+sense)
-      val score = getScore(word, sense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP)
-      if (bestSense == -1 || score > bestScore) {
-        bestScore = score
-        bestSense = sense
-      }
-    }
-    bestSense
-  }
-
-  private def getScore(word: Int, sense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int): Double = {
-    //println("getScore ... ... ...")
-
+  private def getScore(w: Int, neighbors: Array[Int], negSamples: Array[Int], syn0: Array[Array[Array[Float]]], syn1: Array[Array[Array[Float]]], expTable: Array[Float]): Double = {
     var score = 0.0
-    for (neighber <- neighbors) {
-
-      val neighberWord = neighber / 100
-      val neighberSense = neighber % 100
-      //println("getScore ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
-      score += math.log(activeFunction(syn1Sense(word)(sense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
-
-      for (negSample <- negSamples) {
-        val negWord = negSample / 100
-        val negSense = negSample % 100
-        //println("getScore ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
-        if (negWord != word)
-          score += math.log(1 - activeFunction(syn1Sense(negWord)(negSense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP))
-      }
+    for (u <- neighbors) {
+      score += math.log(activeFunction(syn1(u/100)(u%100), syn0(w/100)(w%100), expTable))
+      for (z <- negSamples)
+        if (z/100 != w/100)
+          score += math.log(1 - activeFunction(syn1(u/100)(u%100), syn0(z/100)(z%100), expTable))
     }
     score
   }
 
-  private def activeFunction(v0: Array[Float], v1: Array[Float], expTable: Array[Float], MAX_EXP: Int): Double = {
-    //println("activeFunction ... ... ...")
-
+  private def activeFunction(v0: Array[Float], v1: Array[Float], expTable: Array[Float]): Double = {
     val vectorSize = v0.length
     var f = blas.sdot(vectorSize, v0, 1, v1, 1)
     if (f > MAX_EXP)
@@ -529,63 +551,26 @@ class SenseAssignment extends Serializable {
     f
   }
 
-  //*
-  private def learnParameters(sentence: Array[Int], hyperPara: mutable.HashMap[String, AnyVal], expTable: Array[Float], negTable: Array[Int], senseTable: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]]): Unit = {
-    //println("learnParameters ... ... ...")
+  private def learn(w: Int, neighbors: Array[Int], negSamples: Array[Int], syn0: Array[Array[Array[Float]]], syn1: Array[Array[Array[Float]]], syn0Modify: mutable.HashMap[Int,Boolean], syn1Modify: mutable.HashMap[Int,Boolean],expTable: Array[Float],alpha:Float): Unit = {
+    syn0Modify.put(w,true)
+    for (u <- neighbors) {
+      val neu0e = new Array[Float](vectorSize)
+      val g = (1 - activeFunction(syn1(u/100)(u%100), syn0(w/100)(w%100), expTable)).toFloat *alpha
+      blas.saxpy(vectorSize, g, syn0(w/100)(w%100), 1, neu0e, 1)
+      blas.saxpy(vectorSize, g, syn1(u/100)(u%100), 1, syn0(w/100)(w%100), 1)
 
-    for (wordPos <- 0 to sentence.size - 1) {
-      require(hyperPara.get("numNeg").nonEmpty, "There is no hyperparameter \"numNeg\".")
-      val numNeg = hyperPara.get("numNeg").get.asInstanceOf[Int]
-      require(hyperPara.get("vocabSize").nonEmpty, "There is no hyperparameter \"vocabSize\".")
-      val vocabSize = hyperPara.get("vocabSize").get.asInstanceOf[Int]
-      require(hyperPara.get("window").nonEmpty, "There is no hyperparameter \"window\".")
-      val window = hyperPara.get("window").get.asInstanceOf[Int]
-      require(hyperPara.get("MAX_EXP").nonEmpty, "There is no hyperparameter \"MAX_EXP\".")
-      val MAX_EXP = hyperPara.get("MAX_EXP").get.asInstanceOf[Int]
-      require(hyperPara.get("alpha").nonEmpty, "There is no hyperparameter \"alpha\".")
-      val alpha = hyperPara.get("alpha").get.asInstanceOf[Float]
+      syn1Modify.put(u,true)
 
-      val negSamples = getNegSamples(numNeg, negTable, senseTable, vocabSize)
-      val neighbors = getNeighbors(sentence, wordPos, window)
-      val wordWithSense = sentence(wordPos)
+      for (z <- negSamples)
+        if (z/100 != w/100) {
+          val g = (-activeFunction(syn1(u/100)(u%100), syn0(z/100)(z%100), expTable)).toFloat *alpha
+          blas.saxpy(vectorSize, g, syn0(z/100)(z%100), 1, neu0e, 1)
+          blas.saxpy(vectorSize, g, syn1(u/100)(u%100), 1, syn0(z/100)(z%100), 1)
 
-      learn(wordWithSense, neighbors, negSamples, syn0Sense, syn1Sense, expTable, MAX_EXP, alpha)
-    }
-  }
-
-  private def learn(wordWithSense: Int, neighbors: Array[Int], negSamples: Array[Int], syn0Sense: Array[Array[Array[Float]]], syn1Sense: Array[Array[Array[Float]]], expTable: Array[Float], MAX_EXP: Int, alpha: Float): Unit = {
-    //println("learn ... ... ...")
-
-    val word = wordWithSense / 100
-    val sense = wordWithSense % 100
-    //println("learn ... ... ..."+"word:" +word+" sense:"+sense)
-    val vectorSize = syn0Sense(0)(0).length
-
-    for (neighbor <- neighbors) {
-      val neighberWord = neighbor / 100
-      val neighberSense = neighbor % 100
-      //println("learn ... ... ..."+"neighberWord:" +neighberWord+" neighberSense:"+neighberSense)
-      val neu1e = new Array[Float](vectorSize)
-
-      val g = (1 - activeFunction(syn1Sense(word)(sense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
-      blas.saxpy(vectorSize, g, syn1Sense(word)(sense), 1, neu1e, 1)
-      blas.saxpy(vectorSize, g, syn0Sense(neighberWord)(neighberSense), 1, syn1Sense(word)(sense), 1)
-
-      for (negSample <- negSamples) {
-
-        val negWord = negSample / 100
-        val negSense = negSample % 100
-        //println("learn ... ... ..."+"negWord:" +negWord+" negSense:"+negSense)
-        if (negWord != word) {
-
-          val g = (-activeFunction(syn1Sense(negWord)(negSense), syn0Sense(neighberWord)(neighberSense), expTable, MAX_EXP)).toFloat * alpha
-          blas.saxpy(vectorSize, g, syn1Sense(negWord)(negSense), 1, neu1e, 1)
-          blas.saxpy(vectorSize, g, syn0Sense(neighberWord)(neighberSense), 1, syn1Sense(negWord)(negSense), 1)
+          syn0Modify.put(z,true)
         }
 
-      }
-
-      blas.saxpy(vectorSize, g, neu1e, 1, syn0Sense(neighberWord)(neighberSense), 1)
+      blas.saxpy(vectorSize, g, neu0e, 1, syn1(u/100)(u%100), 1)
     }
 
   }
@@ -593,12 +578,10 @@ class SenseAssignment extends Serializable {
   private def writeToFile(outputPath: String): Unit = {
     require(learned, "parameters need to be learned. You should learn parameters.")
 
-    val file1 = new PrintWriter(new File(outputPath + "/wordSense.txt"))
-    val file2 = new PrintWriter(new File(outputPath + "/syn0Sense.txt"))
-    val file3 = new PrintWriter(new File(outputPath + "/syn1Sense.txt"))
-    val file4 = new PrintWriter(new File(outputPath + "/vectorsSense.txt"))
-
-
+    val file1 = new PrintWriter(new File(outputPath + "/wordIndex.txt"))
+    val file2 = new PrintWriter(new File(outputPath + "/syn0.txt"))
+    val file3 = new PrintWriter(new File(outputPath + "/syn1.txt"))
+    val file4 = new PrintWriter(new File(outputPath + "/vectors.txt"))
     val wordIndex = vocabHash.toArray.sortWith((a, b) => a._2 < b._2)
 
     file4.write(vocabSize+" "+vectorSize+"\n")
@@ -608,17 +591,15 @@ class SenseAssignment extends Serializable {
         file1.write(wordString + "_" + sense + "\n")
         //println(wordString + "_" + sense + " " + word)
         for (i <- 0 to vectorSize - 1)
-          file4.write(" "+syn0Sense(word)(sense)(i))
+          file4.write(" "+syn0(word)(sense)(i))
         file4.write("\n")
       }
     }
-
-
     for (word <- 0 to vocabSize - 1) {
       for (sense <- 0 to senseTable(word) - 1) {
         for (i <- 0 to vectorSize - 1) {
-          file2.write(syn0Sense(word)(sense)(i) + " ")
-          file3.write(syn1Sense(word)(sense)(i) + " ")
+          file2.write(syn0(word)(sense)(i) + " ")
+          file3.write(syn1(word)(sense)(i) + " ")
         }
         file2.write("\n")
         file3.write("\n")
@@ -638,11 +619,11 @@ object SenseAssignment {
   def loadModelSenses(path: String): Word2VecModel = {
     val wordIndex = collection.mutable.Map[String, Int]()
     var index = 0
-    for (word <- Source.fromFile(path+"/wordSense.txt").getLines()) {
+    for (word <- Source.fromFile(path+"/wordIndex.txt").getLines()) {
       wordIndex.put(word, index)
       index += 1
     }
-    val wordVectors = Source.fromFile(path+"/syn0Sense.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
+    val wordVectors = Source.fromFile(path+"/syn0.txt").getLines().map(line => line.split(" ").toSeq).flatten.map(s=>s.toFloat).toArray
     new Word2VecModel(wordIndex.toMap, wordVectors)
   }
 

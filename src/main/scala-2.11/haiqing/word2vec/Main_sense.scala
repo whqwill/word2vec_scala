@@ -2,6 +2,7 @@ package haiqing.word2vec
 
 import org.apache.spark.{SparkContext, SparkConf}
 
+import scala.collection.mutable
 import scala.compat.Platform._
 
 /**
@@ -18,12 +19,11 @@ object Main_sense {
 
     val input = sc.textFile(args(0),sc.defaultParallelism)
 
-    val senseModel = new SenseAssignment
+    val senseModel = new SenseAssignment().setNumRDDs(args(1).toInt).setIterations(args(2).toInt).setLocal(true).setMinCount(args(3).toInt)
 
-    if (args(12) == "1")
-      senseModel.TrainOneSense(input,args(1).toInt,args(2).toInt,args(3).toInt,args(4).toInt,args(5).toInt,args(6).toInt,args(7).toInt, args(8).toFloat, args(9).toLong, args(11))
-    else if (args(12) == "2")
-      senseModel.TrainTwoSenses(input,args(1).toInt,args(2).toInt,args(3).toInt,args(4).toInt,args(5).toInt,args(6).toInt,args(7).toInt, args(8).toFloat, args(9).toLong, args(10), args(11))
+    //senseModel.TrainOneSense(input,args(4))
+
+    senseModel.TrainTwoSenses(input,args(4),args(5))
 
   }
 }

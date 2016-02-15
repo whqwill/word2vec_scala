@@ -13,7 +13,7 @@ object testSenseVectors {
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- synonyms) {
-      println(s"${synonym.substring(0,synonym.size-2)} $cosineSimilarity")
+      println(s"${synonym.substring(0,synonym.size)} $cosineSimilarity")
     }
 
     println()
@@ -22,7 +22,7 @@ object testSenseVectors {
     //val synonyms = model.findSynonyms("day", 10)
 
     for((synonym, cosineSimilarity) <- NEWsynonyms) {
-      println(s"${synonym.substring(0,synonym.size-2)} $cosineSimilarity")
+      println(s"${synonym.substring(0,synonym.size)} $cosineSimilarity")
     }
     println()
 
