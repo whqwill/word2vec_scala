@@ -19,11 +19,13 @@ object Main_sense {
 
     val input = sc.textFile(args(0),sc.defaultParallelism)
 
-    val senseModel = new SenseAssignment().setNumRDDs(args(1).toInt).setIterations(args(2).toInt).setLocal(true).setMinCount(args(3).toInt)
+    val senseModel = new SenseAssignment().setNumRDDs(args(1).toInt).setIterations(args(2).toInt).setMinCount(args(3).toInt).setNegative(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSeed(42l)
 
-    //senseModel.TrainOneSense(input,args(4))
 
-    senseModel.TrainTwoSenses(input,args(4),args(5))
+    if (args.length == 8)
+      senseModel.TrainOneSense(input,args(7))
+    else
+      senseModel.TrainTwoSenses(input,args(7),args(8))
 
   }
 }
