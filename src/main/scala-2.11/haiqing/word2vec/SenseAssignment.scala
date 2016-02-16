@@ -249,13 +249,13 @@ class SenseAssignment extends Serializable {
 
     println("print some words in vocabulary: ")
     for (a <- 0 to vocabSize - 1) {
-      if (vocab(a).word == "so")
+      if (vocab(a).word == "apple")
         senseTable(a) = 2
       else
         senseTable(a) = 1
       if (util.Random.nextInt(vocabSize) < 30)
         println(vocab(a).toString + "  numSenses:" + senseTable(a))
-      if (vocab(a).word == "so")
+      if (vocab(a).word == "apple")
         println(vocab(a).toString + "  numSenses:" + senseTable(a))
     }
   }
@@ -313,6 +313,13 @@ class SenseAssignment extends Serializable {
           syn0(word)(sense)(i) = syn0Old(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
           syn1(word)(sense)(i) = syn1Old(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
         }
+
+        if (vocab(word).word=="apple") {
+          println("!!!!!")
+          syn0(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
+          syn1(word)(sense) = new Array[Float](vectorSize)
+        }
+
       }
     }
 
@@ -367,44 +374,64 @@ class SenseAssignment extends Serializable {
       println("iteration = " + k + "   indexRDD = " + indexRDD)
 
       //adjust sense assignment
-      if (multiSense)
-        sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
-          util.Random.setSeed(seed*idx+k)
-          val syn0 = bcSyn0.value
-          val syn1 = bcSyn1.value
-          val senseTable = bcSenseTable.value
-          val expTable = bcExpTable.value
-          val negTable = bcNegTable.value
+      sentencesSplit(indexRDD) = sentencesSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
+        util.Random.setSeed(seed*idx+k)
+        val syn0 = bcSyn0.value
+        val syn1 = bcSyn1.value
+        val senseTable = bcSenseTable.value
+        val expTable = bcExpTable.value
+        val negTable = bcNegTable.value
 
-          var sumT = 0
+        var sumT = 0
 
-          val newIter = mutable.MutableList[Array[Int]]()
-          for (sentence <- iter) {
-            var t = 1
-            while (adjustSentence(sentence,expTable,negTable,senseTable,syn0,syn1) && t < maxAdjusting)
-              t+=1
-            newIter+=sentence
-            sumT += t
-            if (sentence.contains(vocabHash.get("so").get*100) || sentence.contains(vocabHash.get("so").get*100+1)) {
-              print("partition "+ idx+",  sentence: ")
-              for (element <- sentence) {
-                print(vocab(element / 100).word)
-                if (vocab(element / 100).word == "so")
-                  print("(" + element % 100 + ")")
-                print(" ")
-              }
+        val newIter = mutable.MutableList[Array[Int]]()
+        for (sentence <- iter) {
+
+          for (pos <- 0 to sentence.size-1)
+            if (vocab(sentence(pos)/100).word=="apple") {
+              println()
+              print("partition "+ idx+", original context: ")
+              for (j <- pos - window + 1 to pos + window - 1)
+                if (j >= 0 && j < sentence.size) {
+                  print(vocab(sentence(j) / 100).word)
+                  if (j == pos)
+                    print("(" + sentence(j) % 100 + ")")
+                  print(" ")
+                }
               println()
             }
-          }
 
-          //println("total sentence iterations:"+sumT+ ",   number of sentences:"+newIter.size + ",   iterations per sentence:" + sumT*1.0/newIter.size)
-          newIter.toIterator
-        }.cache()
+          var t = 1
+          while (adjustSentence(sentence,expTable,negTable,senseTable,syn0,syn1) && t < maxAdjusting)
+            t+=1
+          newIter+=sentence
+          sumT += t
 
+
+          for (pos <- 0 to sentence.size-1)
+            if (vocab(sentence(pos)/100).word=="apple") {
+              print("partition "+ idx+", changed context: ")
+              for (j <- pos - window + 1 to pos + window - 1)
+                if (j >= 0 && j < sentence.size) {
+                  print(vocab(sentence(j) / 100).word)
+                  if (j == pos)
+                    print("(" + sentence(j) % 100 + ")")
+                  print(" ")
+                }
+              println()
+              println()
+            }
+
+        }
+
+        println("total sentence iterations:"+sumT+ ",   number of sentences:"+newIter.size + ",   iterations per sentence:" + sumT*1.0/newIter.size)
+        newIter.toIterator
+      }.cache()
+
+      sentencesSplit(indexRDD).count()
 
       val accWordCount = sc.accumulator(0)
       val numPartitions = sc.defaultParallelism
-
 
       //learn syn0 and syn1
       val tmpRDD = sentencesSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
@@ -427,7 +454,7 @@ class SenseAssignment extends Serializable {
           if (wordCount - lastWordCount > 10000) {
             var alpha = learningRate * (1 - (totalWordCount*1.0+wordCount*numPartitions) / totalTrainWords )
             if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
-            //println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
+            println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
             lastWordCount = wordCount
             startTime = currentTime
           }
@@ -457,18 +484,16 @@ class SenseAssignment extends Serializable {
 
       }.cache()
 
-
-      //update syn0 and syn1
-      val synUpdate = tmpRDD.reduceByKey{(a,b)=>
-        blas.saxpy(vectorSize, 1.0f, b._1, 1, a._1, 1)
-        (a._1,b._2+a._2)
-      }.collect()
-
-
       if (local) {
         tmpRDD.count()
       }
-      else {
+      else {      //update syn0 and syn1
+
+        val synUpdate = tmpRDD.reduceByKey{(a,b)=>
+          blas.saxpy(vectorSize, 1.0f, b._1, 1, a._1, 1)
+          (a._1,b._2+a._2)
+        }.collect()
+
         val zero = new Array[Float](vectorSize)
         for ((index, (update,count)) <- synUpdate) {
           if (index / 100 < vocabSize) {
@@ -499,6 +524,8 @@ class SenseAssignment extends Serializable {
       val neighbors = getNeighbors(sentence, pos, window)
       val word = sentence(pos) / 100
 
+
+      val sss = new Array[Double](10)
       //select best score
       var bestSense = -1  //there is no best sense
       var bestScore = 0.0
@@ -509,11 +536,28 @@ class SenseAssignment extends Serializable {
           bestScore = score
           bestSense = sense
         }
+        sss(sense) = score
+
       }
 
-      if (word*100+bestSense != sentence(pos))
+      if (word*100+bestSense != sentence(pos)) {
         change = true
+        //if (vocab(sentence(pos)/100).word=="apple")
+        //println("original:" + sentence(pos)%100)
+        if (vocab(sentence(pos)/100).word=="apple" && sss(1) > sss(0)) {
+          println("changed: " + sss(0) + "->" + sss(1))
+          println("0:" +sss(0))
+          println("1:"+sss(1))
+          println("bestSense"+bestSense)
+          println("bestScore"+bestScore)
+          println(neighbors.mkString(" "))
+          println(negSamples.mkString(" "))
+
+        }
+      }
       sentence(pos) = word*100+bestSense
+
+
     }
     change
   }

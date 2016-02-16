@@ -19,7 +19,7 @@ object Main_sense {
 
     val input = sc.textFile(args(0),sc.defaultParallelism)
 
-    val senseModel = new SenseAssignment().setNumRDDs(args(1).toInt).setIterations(args(2).toInt).setMinCount(args(3).toInt).setNegative(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSeed(42l)
+    val senseModel = new SenseAssignment().setNumRDDs(args(1).toInt).setIterations(args(2).toInt).setMinCount(args(3).toInt).setNegative(args(4).toInt).setWindow(args(5).toInt).setVectorSize(args(6).toInt).setSeed(42l).setLocal(true)
 
 
     if (args.length == 8)
