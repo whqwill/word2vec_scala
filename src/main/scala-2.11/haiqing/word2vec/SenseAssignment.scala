@@ -240,6 +240,8 @@ class SenseAssignment extends Serializable {
       senseTable(a) = 1
       if (util.Random.nextInt(vocabSize) < 30)
         println(vocab(a).toString + "  numSenses:" + senseTable(a))
+      if (vocab(a).word == "apple")
+        println(vocab(a).toString + "  numSenses:" + senseTable(a))
     }
   }
 
@@ -314,11 +316,13 @@ class SenseAssignment extends Serializable {
           syn1(word)(sense)(i) = syn1Old(word * vectorSize + i) + (util.Random.nextFloat() - 0.5f) * VARIANCE
         }
 
+
+        /*
         if (vocab(word).word=="apple") {
           println("!!!!!")
           syn0(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
           syn1(word)(sense) = new Array[Float](vectorSize)
-        }
+        }*/
 
       }
     }
@@ -349,6 +353,8 @@ class SenseAssignment extends Serializable {
     this.vectorSize = vectorSize
   }
 
+  private var index = 0
+
   private def train: Unit = {
     require(syn0 != null, "syn0 should not be null. You may need to check if initializing parameters correctly.")
     require(syn1 != null, "syn1 should not be null. You may need to check if initializing parameters correctly.")
@@ -357,6 +363,44 @@ class SenseAssignment extends Serializable {
     println(sc.defaultParallelism + "   " + sc.master)
 
     val sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x=>x+1.0))
+
+    println("sentencesSplit(0)"+sentencesSplit(0).count())
+
+    if (false) {
+      println("!!!!!!!!!!!!!!!!!!!!!!!!!!~~~~~~~~~~~~~~~~~!!!!!!!!!!!")
+      sentencesSplit(0) = sc.textFile("new00/new1.txt", sc.defaultParallelism).map(line => line.split(" ").array).map { sentence =>
+        sentence.filter(x => x.size > 0).map { x =>
+          var begin = 0;
+          var end = x.size - 1;
+          while (begin <= end && !x(begin).isLetter)
+            begin += 1
+          while (begin <= end && !x(end).isLetter)
+            end -= 1
+          x.substring(begin, end + 1)
+        }.map(x => x.toLowerCase).filter(x => x.size > 0 && vocabHash.get(x).nonEmpty).map { x =>
+          val word = vocabHash.get(x).get
+          word * 100 + util.Random.nextInt(senseTable(word))
+        }
+      }.cache()
+
+      println("sentencesSplit(0)"+sentencesSplit(0).count())
+
+      sentencesSplit(1) = sc.textFile("new00/new2.txt", sc.defaultParallelism).map(line => line.split(" ").array).map { sentence =>
+        sentence.filter(x => x.size > 0).map { x =>
+          var begin = 0;
+          var end = x.size - 1;
+          while (begin <= end && !x(begin).isLetter)
+            begin += 1
+          while (begin <= end && !x(end).isLetter)
+            end -= 1
+          x.substring(begin, end + 1)
+        }.map(x => x.toLowerCase).filter(x => x.size > 0 && vocabHash.get(x).nonEmpty).map { x =>
+          val word = vocabHash.get(x).get
+          word * 100 + util.Random.nextInt(senseTable(word))
+        }
+      }.cache()
+      println("sentencesSplit(1)"+sentencesSplit(1).count())
+    }
 
     var totalWordCount = 0
     val totalTrainWords = totalWords*iterations
@@ -371,6 +415,8 @@ class SenseAssignment extends Serializable {
     for (k <- 1 to totalIterations) {
 
       val indexRDD = (k-1) % numRDDs
+
+      this.index = indexRDD% numRDDs
       println("iteration = " + k + "   indexRDD = " + indexRDD)
 
       //adjust sense assignment
@@ -387,6 +433,7 @@ class SenseAssignment extends Serializable {
         val newIter = mutable.MutableList[Array[Int]]()
         for (sentence <- iter) {
 
+
           for (pos <- 0 to sentence.size-1)
             if (vocab(sentence(pos)/100).word=="apple") {
               println()
@@ -400,6 +447,7 @@ class SenseAssignment extends Serializable {
                 }
               println()
             }
+
 
           var t = 1
           while (adjustSentence(sentence,expTable,negTable,senseTable,syn0,syn1) && t < maxAdjusting)
@@ -424,7 +472,7 @@ class SenseAssignment extends Serializable {
 
         }
 
-        println("total sentence iterations:"+sumT+ ",   number of sentences:"+newIter.size + ",   iterations per sentence:" + sumT*1.0/newIter.size)
+        //println("total sentence iterations:"+sumT+ ",   number of sentences:"+newIter.size + ",   iterations per sentence:" + sumT*1.0/newIter.size)
         newIter.toIterator
       }.cache()
 
@@ -454,7 +502,7 @@ class SenseAssignment extends Serializable {
           if (wordCount - lastWordCount > 10000) {
             var alpha = learningRate * (1 - (totalWordCount*1.0+wordCount*numPartitions) / totalTrainWords )
             if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
-            println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
+            //println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
             lastWordCount = wordCount
             startTime = currentTime
           }
@@ -478,7 +526,7 @@ class SenseAssignment extends Serializable {
         for ((index,nothing)<-syn1Modify)
           synIter += (index+vocabSize*100)->(syn1(index/100)(index%100)->1)
 
-        println("partition "+ idx+ ",  synIter.size = " + synIter.size)
+        //println("partition "+ idx+ ",  synIter.size = " + synIter.size)
 
         synIter.toIterator
 
@@ -527,6 +575,8 @@ class SenseAssignment extends Serializable {
 
       val sss = new Array[Double](10)
       //select best score
+
+
       var bestSense = -1  //there is no best sense
       var bestScore = 0.0
       for (sense <- 0 to senseTable(word)-1) {
@@ -540,10 +590,17 @@ class SenseAssignment extends Serializable {
 
       }
 
+      /*
+      var bestSense = index
+      if (bestSense >= senseTable(word))
+        bestSense=senseTable(word)-1
+*/
+
       if (word*100+bestSense != sentence(pos)) {
         change = true
         //if (vocab(sentence(pos)/100).word=="apple")
         //println("original:" + sentence(pos)%100)
+        /*
         if (vocab(sentence(pos)/100).word=="apple" && sss(1) > sss(0)) {
           println("changed: " + sss(0) + "->" + sss(1))
           println("0:" +sss(0))
@@ -553,7 +610,7 @@ class SenseAssignment extends Serializable {
           println(neighbors.mkString(" "))
           println(negSamples.mkString(" "))
 
-        }
+        }*/
       }
       sentence(pos) = word*100+bestSense
 
@@ -632,7 +689,6 @@ class SenseAssignment extends Serializable {
 
       blas.saxpy(vectorSize, g, neu0e, 1, syn1(u/100)(u%100), 1)
     }
-
   }
 
   private def writeToFile(outputPath: String): Unit = {
