@@ -15,7 +15,7 @@ class SenseAssignment extends Serializable {
 
   private var vectorSize = 100
   private var minCount = 5
-  private var iterations = 2
+  private var epochs = 2
   private var window = 5
   private var negative = 5
   private var learningRate = 0.025f
@@ -33,8 +33,8 @@ class SenseAssignment extends Serializable {
     this.minCount = minCount
     this
   }
-  def setIterations(iterations: Int): this.type = {
-    this.iterations = iterations
+  def setEpochs(epochs: Int): this.type = {
+    this.epochs = epochs
     this
   }
   def setWindow(window: Int): this.type = {
@@ -66,7 +66,6 @@ class SenseAssignment extends Serializable {
     this
   }
 
-
   private val EXP_TABLE_SIZE = 1000
   private val MAX_EXP = 6
   private val POWER = 0.75
@@ -83,6 +82,7 @@ class SenseAssignment extends Serializable {
     }
     expTable
   }
+
   private def createNegTable(): Array[Int] = {
     val table = new Array[Int](TABEL_SIZE)
     var trainWordsPow = 0.0
@@ -107,7 +107,7 @@ class SenseAssignment extends Serializable {
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var senseTable: Array[Int] = null
   private var totalWords = 0
-  private var sentences: RDD[Array[Int]] = null
+  private var sentenceRDD: RDD[Array[Int]] = null
   private var totalSentences = 0
   private var syn0: Array[Array[Array[Float]]] = null
   private var syn1: Array[Array[Array[Float]]] = null
@@ -132,18 +132,18 @@ class SenseAssignment extends Serializable {
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
-    println("make sentences ... ... ...")
-    makeSentences(input)
-    println("time:"+(currentTime-oldTime)/1000.0)
-    oldTime = currentTime
-
     println("initialize parameters ... ... ...")
     initSynRandomly
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
+    println("make sentences ... ... ...")
+    val sentenceRDD = makeSentences(input)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
     println("train (local version) ... ... ...")
-    train
+    train(sentenceRDD)
     println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
@@ -155,7 +155,7 @@ class SenseAssignment extends Serializable {
     println("total time:"+(currentTime-startTime)/1000.0)
   }
 
-  def TrainTwoSenses(input: RDD[String], synPath: String, outputPath: String): Unit = {
+  def TrainTwoSenses(input: RDD[String], threshold: Int, synPath: String, outputPath: String): Unit = {
     val startTime = currentTime
     var oldTime = startTime
 
@@ -167,13 +167,8 @@ class SenseAssignment extends Serializable {
     oldTime = currentTime
 
     println("create Sense Table ... ... ...")
-    createTwoSensesTable(1000)
+    createTwoSensesTable(threshold)
     println("time:" + (currentTime - oldTime) / 1000.0)
-    oldTime = currentTime
-
-    println("make sentences ... ... ...")
-    makeSentences(input)
-    println("time:"+(currentTime-oldTime)/1000.0)
     oldTime = currentTime
 
     println("initialize parameters ... ... ...")
@@ -181,9 +176,19 @@ class SenseAssignment extends Serializable {
     println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
-    println("train (local version) ... ... ...")
-    train
+    println("make sentences ... ... ...")
+    val sentenceRDD = makeSentences(input)
     println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("train (local version) ... ... ...")
+    train(sentenceRDD)
+    println("time:"+(currentTime-oldTime)/1000.0)
+    oldTime = currentTime
+
+    println("wrote to file ... ... ...")
+    writeToFile(outputPath)
+    println("time:" + (currentTime - oldTime) / 1000.0)
     oldTime = currentTime
 
     println("wrote to file ... ... ...")
@@ -199,6 +204,7 @@ class SenseAssignment extends Serializable {
   }
 
   private def learnVocab(input: RDD[String]): Unit = {
+    //remove the beginning and end non-letter, and then transform to lowercase letter
     val words = input.map(line => line.split(" ").array).flatMap(x=>x).filter(x=>x.size>0).map{x=>
       var begin = 0;
       var end = x.size-1;
@@ -209,7 +215,8 @@ class SenseAssignment extends Serializable {
       x.substring(begin,end+1)
     }.map(x=>x.toLowerCase).filter(x=>x.size>0)
 
-    require(words != null, "words RDD is null. You may need to check if loading data correctly.d")
+    require(words != null, "words RDD is null. You may need to check if loading data correctly.")
+    //build vocabulary with count of each word, and remove the infrequent words
     vocab = words.map(w => (w, 1))
       .reduceByKey(_ + _)
       .map(x => VocabWord(
@@ -262,14 +269,14 @@ class SenseAssignment extends Serializable {
     }
   }
 
-  private def makeSentences(input: RDD[String]): Unit = {
+  private def makeSentences(input: RDD[String]): RDD[Array[Int]] = {
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check if learning vocabulary correctly.")
 
     val sc = input.context
     val bcVacabHash = sc.broadcast(vocabHash)
     val bcNumSensesTable = sc.broadcast(senseTable)
 
-    sentences = input.map(line => line.split(" ").array).map{sentence=>
+    val sentenceRDD = input.map(line => line.split(" ").array).map{sentence=>
       sentence.filter(x=>x.size>0).map{x=>
         var begin = 0;
         var end = x.size-1;
@@ -286,6 +293,7 @@ class SenseAssignment extends Serializable {
 
     totalSentences = sentences.count().toInt
     println("totalSentences = " + totalSentences)
+    sentenceRDD
   }
 
   //initialize from normal skip-gram model
@@ -346,7 +354,7 @@ class SenseAssignment extends Serializable {
       for (sense <- 0 to senseTable(word) - 1) {
 
         syn0(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
-        syn1(word)(sense) = new Array[Float](vectorSize)
+        syn1(word)(sense) = Array.fill[Float](vectorSize)((util.Random.nextFloat() - 0.5f) / vectorSize)
       }
     }
 
@@ -355,11 +363,11 @@ class SenseAssignment extends Serializable {
 
   private var index = 0
 
-  private def train: Unit = {
+  private def train(sentenceRDD: RDD[Array[Int]]): Unit = {
     require(syn0 != null, "syn0 should not be null. You may need to check if initializing parameters correctly.")
     require(syn1 != null, "syn1 should not be null. You may need to check if initializing parameters correctly.")
 
-    val sc = sentences.context
+    val sc = sentenceRDD.context
     println(sc.defaultParallelism + "   " + sc.master)
 
     val sentencesSplit = sentences.randomSplit(new Array[Double](numRDDs).map(x=>x+1.0))
@@ -545,6 +553,7 @@ class SenseAssignment extends Serializable {
           }
 
         //println("partition "+ idx+ ",  synIter.size = " + synIter.size)
+        println("partition "+ idx+ ",  syn0Modify(0)(0)="+syn0Modify(0)(0))
 
         synIter.toIterator
 
@@ -645,8 +654,6 @@ class SenseAssignment extends Serializable {
         }
       }
       sentence(pos) = word*100+bestSense
-
-
     }
     change
   }
@@ -704,18 +711,17 @@ class SenseAssignment extends Serializable {
 
     for (u <- neighbors) {
       val neu0e = new Array[Float](vectorSize)
-      val g = (1 - activeFunction(syn1(u/100)(u%100), syn0(w/100)(w%100), expTable)).toFloat *alpha
-      blas.saxpy(vectorSize, g, syn0(w/100)(w%100), 1, neu0e, 1)
-      blas.saxpy(vectorSize, g, syn1(u/100)(u%100), 1, syn0(w/100)(w%100), 1)
+      val g = (1 - activeFunction(syn0(u/100)(u%100), syn1(w/100)(w%100), expTable)).toFloat *alpha
+      blas.saxpy(vectorSize, g, syn1(w/100)(w%100), 1, neu0e, 1)
+      blas.saxpy(vectorSize, g, syn0(u/100)(u%100), 1, syn1(w/100)(w%100), 1)
 
       for (z <- negSamples)
         if (z/100 != w/100) {
-          val g = (-activeFunction(syn1(u/100)(u%100), syn0(z/100)(z%100), expTable)).toFloat *alpha
-          blas.saxpy(vectorSize, g, syn0(z/100)(z%100), 1, neu0e, 1)
-          blas.saxpy(vectorSize, g, syn1(u/100)(u%100), 1, syn0(z/100)(z%100), 1)
+          val g = (-activeFunction(syn0(u/100)(u%100), syn1(z/100)(z%100), expTable)).toFloat *alpha
+          blas.saxpy(vectorSize, g, syn1(z/100)(z%100), 1, neu0e, 1)
+          blas.saxpy(vectorSize, g, syn0(u/100)(u%100), 1, syn1(z/100)(z%100), 1)
         }
-
-      blas.saxpy(vectorSize, g, neu0e, 1, syn1(u/100)(u%100), 1)
+      blas.saxpy(vectorSize, g, neu0e, 1, syn0(u/100)(u%100), 1)
     }
   }
 

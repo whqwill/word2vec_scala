@@ -18,11 +18,6 @@ object testOriginal {
     val sc = new SparkContext(conf)
     println(sc.defaultParallelism + "   " + sc.master)
 
-    if (args(0) == "1")
-      println(sc.textFile(args(1)).count())
-
-
-
     /*
     val in = sc.textFile(args(0),sc.defaultParallelism)
 
@@ -62,16 +57,16 @@ object testOriginal {
       println("total time:" + (currentTime - startTime) / 1000.0)
     }
 */
-return
+
     val input = sc.textFile(args(0)).map(line => line.split(" ").toSeq)
 
-    val word2vec = new Word2Vec().setNumPartitions(sc.defaultParallelism).setNumIterations(1)
+    val word2vec = new Word2Vec().setNumPartitions(1).setNumIterations(1).setMinCount(5).setLearningRate(0.025).setSeed(42l).setVectorSize(100).setWindowSize(5)
 
     val startTime = currentTime
     val model = word2vec.fit(input)
     println("total time:" + (currentTime - startTime) / 1000.0)
 
-    val synonyms = model.findSynonyms("bank", 40)
+    val synonyms = model.findSynonyms(args(1), 40)
 
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")
