@@ -20,7 +20,7 @@ class SenseAssignment extends Serializable {
   private var epoch = 2
   private var window = 5
   private var negative = 5
-  private var learningRate = 0.025f
+  private var learningRate = 0.001f
   private var seed = 42l
   private var numRDDs = 5
   private var maxAdjusting = 10
@@ -388,7 +388,7 @@ class SenseAssignment extends Serializable {
         for ((sentence,sentenceNEG) <- iter) {
           var t = 1
           F.setSentence(sentence)
-          F.setSentenceNEG(sentenceNEG)
+          F.setSentenceNEG(sentenceNEG)ope
           while (F.adjustSentence() && t < maxAdjusting)
             t+=1
           newIter+=sentence->sentenceNEG
