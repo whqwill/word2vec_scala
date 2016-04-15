@@ -20,11 +20,12 @@ class SenseAssignment extends Serializable {
   private var epoch = 2
   private var window = 5
   private var negative = 5
-  private var learningRate = 0.001f
+  private var learningRate = 0.025f
   private var seed = 42l
   private var numRDDs = 5
   private var maxAdjusting = 10
   private var multiSense = 2
+  private var stepSize = 10000
   private var local = true
   private var testStep = 5
 
@@ -52,7 +53,7 @@ class SenseAssignment extends Serializable {
     this.negative = negative
     this
   }
-  def setLearningRate(learningRate: Int): this.type = {
+  def setLearningRate(learningRate: Float): this.type = {
     this.learningRate = learningRate
     this
   }
@@ -78,6 +79,10 @@ class SenseAssignment extends Serializable {
   }
   def setTestStep(testStep: Int): this.type = {
     this.testStep = testStep
+    this
+  }
+  def setStepSize(stepSize: Int): this.type = {
+    this.stepSize = stepSize
     this
   }
 
@@ -388,7 +393,7 @@ class SenseAssignment extends Serializable {
         for ((sentence,sentenceNEG) <- iter) {
           var t = 1
           F.setSentence(sentence)
-          F.setSentenceNEG(sentenceNEG)ope
+          F.setSentenceNEG(sentenceNEG)
           while (F.adjustSentence() && t < maxAdjusting)
             t+=1
           newIter+=sentence->sentenceNEG
@@ -462,7 +467,7 @@ class SenseAssignment extends Serializable {
         if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
 
         for ((sentence,sentenceNEG) <- iter) {
-          if (wordCount - lastWordCount > 10000) {
+          if (wordCount - lastWordCount > stepSize) {
             var alpha = learningRate * (1 - (totalWordCount*1.0+wordCount*numPartitions) / totalTrainWords )
             if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
             //println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
