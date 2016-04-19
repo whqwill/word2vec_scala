@@ -1,9 +1,6 @@
-package haiqing.word2vec
+package haiqing.sense2vec
 
-import org.apache.spark.{SparkContext, SparkConf}
-
-import scala.collection.mutable
-import scala.compat.Platform._
+import org.apache.spark.{SparkConf, SparkContext}
 
 /**
  * Created by hwang on 09.02.16.

@@ -1,10 +1,12 @@
-package haiqing.word2vec
+package haiqing.sense2vec
 
 import com.github.fommil.netlib.BLAS.{getInstance => blas}
 
 /**
  * Created by hwang on 04.03.16.
  */
+
+//this class is used in the map function of spark
 class IterationFunctions (private val window: Int, private val vectorSize: Int, private val multiSense: Int,
                           private val senseCountAdd: Array[Array[Int]], private val senseCount: Array[Array[Int]],
                           private val expTable: Array[Float], private val senseTable: Array[Int],
@@ -16,14 +18,17 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   private var sentence: Array[Int] = null
   private var sentenceNEG: Array[Array[Int]] = null
 
+  //set sentence
   def setSentence(sentence: Array[Int]): Unit = {
     this.sentence = sentence
   }
 
+  //set sentence negative samplings
   def setSentenceNEG(sentenceNEG: Array[Array[Int]]): Unit = {
     this.sentenceNEG = sentenceNEG
   }
 
+  //adjust senses in the sentence
   def adjustSentence(): Boolean = {
     var flag = false
     for (pos <- 0 to sentence.size - 1) {
@@ -48,6 +53,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     flag
   }
 
+  //loss = - score, skip-gram score from whole sentence
   def sentenceLoss(): Double = {
     var loss = 0.0
     for (pos <- 0 to sentence.size - 1)
@@ -55,6 +61,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     loss
   }
 
+  //log probability of using center word to predict surrouding words
   private def getScore(w: Int, pos: Int): Double = {
     var score = 0.0
     for (p <- pos-window+1 to pos+window-1)
@@ -68,6 +75,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     score
   }
 
+  //count the sense which is used
   def addSenseCount(): Unit = {
     for (w <- sentence) {
       val word = w / ENCODE
@@ -76,6 +84,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     }
   }
 
+  //skip-gram learning from the whole sentence
   def learnSentence(alpha: Float): Unit = {
     for (pos <- 0 to sentence.size - 1) {
       val w = sentence(pos)
@@ -97,6 +106,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     }
   }
 
+  //skip-gram model, use center word to predict surroung words
   private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Unit = {
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
@@ -115,6 +125,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     }
   }
 
+  //sigmoid function applying on two vectors
   private def activeFunction(v0: Array[Float], v1: Array[Float]): Double = {
     val vectorSize = v0.length
     var f = blas.sdot(vectorSize, v0, 1, v1, 1)

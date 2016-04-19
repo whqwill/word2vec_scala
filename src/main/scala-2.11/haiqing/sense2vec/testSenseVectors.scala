@@ -1,4 +1,4 @@
-package haiqing.word2vec
+package haiqing.sense2vec
 
 /**
  * Created by hwang on 09.02.16.

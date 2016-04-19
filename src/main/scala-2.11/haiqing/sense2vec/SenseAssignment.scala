@@ -1,14 +1,13 @@
-package haiqing.word2vec
+package haiqing.sense2vec
 
 import java.io._
 
-import scala.compat.Platform._
+import com.github.fommil.netlib.BLAS.{getInstance => blas}
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuilder
+import scala.compat.Platform._
 import scala.io.Source
-import com.github.fommil.netlib.BLAS.{getInstance => blas}
 /**
  * Created by hwang on 09.02.16.
  */
