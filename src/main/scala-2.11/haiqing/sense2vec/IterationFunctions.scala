@@ -7,10 +7,10 @@ import com.github.fommil.netlib.BLAS.{getInstance => blas}
  */
 
 //this class is used in the map function of spark
-class IterationFunctions (private val window: Int, private val vectorSize: Int, private val multiSense: Int,
+class IterationFunctions (private val window: Int, private val vectorSize: Int, private val multiSense: Int, private val negative: Int, private val vocabSize: Int,
                           private val senseCountAdd: Array[Array[Int]], private val senseCount: Array[Array[Int]],
-                          private val expTable: Array[Float], private val senseTable: Array[Int],
-                          private val syn0: Array[Array[Array[Float]]], private val syn1: Array[Array[Array[Float]]]) {
+                          private val expTable: Array[Float], private val senseTable: Array[Int], private val negTable: Array[Int],
+                          private val syn0: Array[Array[Array[Float]]], private val syn1: Array[Array[Array[Float]]])  {
   private val MAX_EXP = 6
   private val U = 100
   private val ENCODE = 100
@@ -26,6 +26,11 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   //set sentence negative samplings
   def setSentenceNEG(sentenceNEG: Array[Array[Int]]): Unit = {
     this.sentenceNEG = sentenceNEG
+  }
+
+  //generate sentence negative samples
+  def generateSentenceNEG(): Unit = {
+    sentenceNEG = sentence.map(w=>getNEG(w,negTable))
   }
 
   //adjust senses in the sentence
@@ -106,6 +111,22 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     }
   }
 
+  private def getNEG(w: Int, negTable: Array[Int]): Array[Int] = {
+    val negSamples = new Array[Int](negative)
+    val tableSize = negTable.size
+    for (i <- 0 to negative - 1) {
+      negSamples(i) = w
+      while (negSamples(i)/ENCODE == w/ENCODE) {
+        negSamples(i) = negTable(Math.abs(util.Random.nextLong() % tableSize).toInt)
+        if (negSamples(i) <= 0)
+          negSamples(i) = (Math.abs(util.Random.nextLong()) % (vocabSize - 1) + 1).toInt
+      }
+      //add sense information (assign sense randomly)
+      negSamples(i) = negSamples(i) * ENCODE + util.Random.nextInt(senseTable(negSamples(i)))
+    }
+    negSamples
+  }
+  
   //skip-gram model, use center word to predict surroung words
   private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Unit = {
     for (p <- pos-window+1 to pos+window-1)
