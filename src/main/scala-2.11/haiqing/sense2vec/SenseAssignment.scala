@@ -4,6 +4,7 @@ import java.io._
 
 import com.github.fommil.netlib.BLAS.{getInstance => blas}
 import org.apache.spark.SparkContext
+import org.apache.spark.mllib.linalg.{Vectors, Vector}
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
@@ -12,6 +13,9 @@ import scala.io.Source
 /**
  * Created by hwang on 09.02.16.
  */
+
+
+
 class SenseAssignment extends Serializable {
 
   private var vectorSize = 100
@@ -153,12 +157,9 @@ class SenseAssignment extends Serializable {
 
     initSynRandomly()
 
+    val splitedData = input.randomSplit(Array[Double](1-validationRatio,validationRatio), util.Random.nextLong())
 
-    //val splitedData = input.randomSplit(Array[Double](1-validationRatio,validationRatio), util.Random.nextLong())
-
-    sc = input.sparkContext
-
-    trainingSet = makeSentences(input)
+    trainingSet = makeSentences(splitedData(0))
 
     validationSet = makeSentencesWithNEG(splitedData(1))
 
@@ -181,8 +182,6 @@ class SenseAssignment extends Serializable {
     initSynFromFile(synPath)
 
     val splitedData = input.randomSplit(Array[Double](1-validationRatio,validationRatio), util.Random.nextLong())
-
-    sc = input.sparkContext
 
     trainingSet = makeSentences(splitedData(0))
 
@@ -269,12 +268,9 @@ class SenseAssignment extends Serializable {
   private def makeSentences(input: RDD[String]): RDD[Array[Int]] = {
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check if learning vocabulary correctly.")
 
-    println("blablabla+"+input.count())
-
     val sc = input.context
     val bcVocabHash = sc.broadcast(vocabHash)
     val bcSenseTable = sc.broadcast(senseTable)
-    val bcNegTable = sc.broadcast(createNegTable())
 
     val sentenceRDD = input.map(line => line.split(" ").array).map{sentence=>
       val newSentence = sentence.filter(x=>x.size>0).map{x=>
@@ -305,7 +301,6 @@ class SenseAssignment extends Serializable {
     val bcVocabHash = sc.broadcast(vocabHash)
     val bcSenseTable = sc.broadcast(senseTable)
     val bcNegTable = sc.broadcast(createNegTable())
-    println("blablabla+"+input.count())
 
     val sentenceRDD = input.map(line => line.split(" ").array).map{sentence=>
       val newSentence = sentence.filter(x=>x.size>0).map{x=>
@@ -320,7 +315,7 @@ class SenseAssignment extends Serializable {
         val word = bcVocabHash.value.get(x).get
         word*100+util.Random.nextInt(bcSenseTable.value(word))
       }
-      val sentenceNEG = newSentence.map(w=>Array[Int](1,2,3))
+      val sentenceNEG = newSentence.map(w=>getNEG(w,bcNegTable.value))
       (newSentence, sentenceNEG)
     }.cache()
 
@@ -393,6 +388,7 @@ class SenseAssignment extends Serializable {
     require(syn0 != null, "syn0 should not be null. You may need to check if initializing parameters correctly.")
     require(syn1 != null, "syn1 should not be null. You may need to check if initializing parameters correctly.")
 
+    val sc = trainingSet.context
     val trainSplit = trainingSet.randomSplit(new Array[Double](numRDDs).map(x=>x+1.0))
     val numPartitions = sc.defaultParallelism
 
@@ -426,6 +422,9 @@ class SenseAssignment extends Serializable {
     for (k <- 1 to iterations) {
 
       val indexRDD = (k-1) % numRDDs
+
+      println("iteration = " + k + "   indexRDD = " + indexRDD+ " validation size = " + validationSet.count() + " trainSplit(indexRDD) size =  " + trainSplit(indexRDD).count())
+
       //initialize senseCountAdd and broadcast senseCountAdd
       for (word <- 0 to vocabSize-1)
         for (sense <- 0 to senseTable(word)-1) {
@@ -437,8 +436,10 @@ class SenseAssignment extends Serializable {
       var lossNum = sc.accumulator(0)
       var adjust = sc.accumulator(0)
 
+      println("validationSet.count()="+validationSet.count())
+
       //adjust sense assignment and calculate loss for validation set
-      /*println("iteration = " + k + "   indexRDD = " + indexRDD+ " adjust sense assignment and calculate loss for validation set...")
+      println("iteration = " + k + "   indexRDD = " + indexRDD+ " adjust sense assignment and calculate loss for validation set...")
       validationSet = validationSet.mapPartitionsWithIndex {(idx,iter) =>
         util.Random.setSeed(seed*idx+k)
         val F = new IterationFunctions(window,vectorSize,multiSense,negative,vocabSize,null,null,bcExpTable.value,bcSenseTable.value,bcNegTable.value,bcSyn0.value,bcSyn1.value)
@@ -458,11 +459,13 @@ class SenseAssignment extends Serializable {
       }.cache()
       val sentenceNumValidation = validationSet.count()
       println("Average number of adjustments per sentence: " + adjust.value*1.0/sentenceNumValidation)
-      println("Average loss per word: "+loss.value/lossNum.value)*/
+      println("Average loss per word: "+loss.value/lossNum.value)
 
       loss = sc.accumulator(0.0)
       lossNum = sc.accumulator(0)
       adjust = sc.accumulator(0)
+
+      println("trainSplit(indexRDD).count()="+trainSplit(indexRDD).count())
 
       //adjust sense assignment and calculate loss for training set
       println("iteration = " + k + "   indexRDD = " + indexRDD+ " adjust sense assignment and calculate loss for training set...")
@@ -667,3 +670,4 @@ object SenseAssignment {
   }
 
 }
+

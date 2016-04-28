@@ -2,6 +2,8 @@ package haiqing.sense2vec
 
 import org.apache.spark.{SparkConf, SparkContext}
 
+import scala.collection.mutable
+
 /**
  * Created by hwang on 09.02.16.
  */
@@ -22,5 +24,7 @@ object Main_sense {
       senseModel.TrainOneSense(input,args(12))
     else
       senseModel.TrainMultiSense(input,args(12),args(13))
+
+
   }
 }

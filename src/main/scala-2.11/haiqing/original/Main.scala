@@ -26,7 +26,7 @@ object Main {
       println(s"$synonym $cosineSimilarity")
     }
 
-    /*
+
     println("apple")
     synonyms = model.findSynonyms("apple", 30)
     for((synonym, cosineSimilarity) <- synonyms) {
@@ -38,7 +38,7 @@ object Main {
     for((synonym, cosineSimilarity) <- synonyms) {
       println(s"$synonym $cosineSimilarity")
     }
-    */
+
 
   }
 }

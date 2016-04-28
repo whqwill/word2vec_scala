@@ -1,8 +1,5 @@
 package haiqing.original
 
-/**
- * Created by hwang on 19.04.16.
- */
 import java.lang.{Iterable => JavaIterable}
 
 import scala.collection.JavaConverters._
@@ -300,7 +297,7 @@ class Word2Vec extends Serializable {
         wordIndexes.grouped(maxSentenceLength).map(_.toArray)
       }
     }
-
+    
     val newSentences = sentences.repartition(numPartitions).cache()
 
     if (vocabSize.toLong * vectorSize >= Int.MaxValue) {
@@ -314,12 +311,18 @@ class Word2Vec extends Serializable {
     val syn1Global = new Array[Float](vocabSize * vectorSize)
     var alpha = learningRate
 
+    val sentenceSplited = newSentences.randomSplit(Array[Double](0.9,0.1), util.Random.nextLong())
+    val trainSentence = sentenceSplited(0)
+    val validationSentence = sentenceSplited(1)
+
     for (k <- 1 to numIterations) {
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
-      val loss = sc.accumulator(0.0)
-      val lossNum = sc.accumulator(0)
-      newSentences.foreachPartition { iter =>
+
+      var loss = sc.accumulator(0.0)
+      var lossNum = sc.accumulator(0)
+      println("iteration = " + k + " adjust sense assignment and calculate loss for validation set...")
+      validationSentence.foreachPartition { iter =>
         val syn0 = bcSyn0Global.value
         val syn1 = bcSyn1Global.value
         iter.foldLeft(()) {
@@ -363,11 +366,58 @@ class Word2Vec extends Serializable {
             }
         }
       }
-      println("iteration = " + k)
       println("Average loss per word: "+loss.value/lossNum.value+" "+loss.value+" "+lossNum.value)
-      println("syn0Global(0)="+syn0Global(0))
 
-      println("training ... ")
+      loss = sc.accumulator(0.0)
+      lossNum = sc.accumulator(0)
+      println("iteration = " + k + " adjust sense assignment and calculate loss for training set...")
+      trainSentence.foreachPartition { iter =>
+        val syn0 = bcSyn0Global.value
+        val syn1 = bcSyn1Global.value
+        iter.foldLeft(()) {
+          case ((),sentence) =>
+            lossNum += sentence.length
+            var pos = 0
+            while (pos < sentence.length) {
+              val word = sentence(pos)
+              val b = util.Random.nextInt(window)
+              // Train Skip-gram
+              var a = b
+              while (a < window * 2 + 1 - b) {
+                if (a != window) {
+                  val c = pos - window + a
+                  if (c >= 0 && c < sentence.length) {
+                    val lastWord = sentence(c)
+                    val l1 = lastWord * vectorSize
+                    // Hierarchical softmax
+                    var d = 0
+                    while (d < bcVocab.value(word).codeLen) {
+                      val inner = bcVocab.value(word).point(d)
+                      val l2 = inner * vectorSize
+                      // Propagate hidden -> output
+                      var f = blas.sdot(vectorSize, syn0, l1, 1, syn1, l2, 1)
+                      if (f > -MAX_EXP && f < MAX_EXP) {
+                        val ind = ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2.0)).toInt
+                        f = expTable.value(ind)
+                        if (bcVocab.value(word).code(d) == 1)
+                          loss += -Math.log(1-f)
+                        else
+                          loss += -Math.log(f)
+                        //println("f="+f)
+                      }
+                      d += 1
+                    }
+                  }
+                }
+                a += 1
+              }
+              pos += 1
+            }
+        }
+      }
+      println("Average loss per word: "+loss.value/lossNum.value+" "+loss.value+" "+lossNum.value)
+
+      println("learn parameters and embeddings from training set ... ")
       val partial = newSentences.mapPartitionsWithIndex { case (idx, iter) =>
         val syn0Modify = new Array[Int](vocabSize)
         val syn1Modify = new Array[Int](vocabSize)
@@ -487,8 +537,8 @@ class Word2Vec extends Serializable {
  *                    (i * vectorSize, i * vectorSize + vectorSize)
  */
 class Word2VecModel (
-                                     val wordIndex: Map[String, Int],
-                                     val wordVectors: Array[Float]) extends Serializable  {
+                      val wordIndex: Map[String, Int],
+                      val wordVectors: Array[Float]) extends Serializable  {
 
   private val numWords = wordIndex.size
   // vectorSize: Dimension of each word's vector.
