@@ -550,6 +550,8 @@ class SenseAssignment extends Serializable {
         var wordCount = 0
         var alpha = learningRate * (1 - totalWordCount * 1.0f / totalTrainWords )
         if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
+        if (idx == 0)
+          println("alpha="+alpha)
 
         for (sentence <- iter) {
           if (wordCount - lastWordCount > stepSize) {

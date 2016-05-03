@@ -29,9 +29,9 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   }
 
   //generate sentence negative samples
-  def generateSentenceNEG(): Unit = {
-    sentenceNEG = sentence.map(w=>getNEG(w,negTable))
-  }
+  //def generateSentenceNEG(): Unit = {
+  //  sentenceNEG = sentence.map(w=>getNEG(w,negTable))
+  //}
 
   //adjust senses in the sentence
   def adjustSentence(): Boolean = {
@@ -66,13 +66,17 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     loss
   }
 
-  //log probability of using center word to predict surrouding words
+  //log probability of using center word to predict surrounding words
   private def getScore(w: Int, pos: Int): Double = {
     var score = 0.0
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
         val u = sentence(p)
-        val NEG = sentenceNEG(p)
+        var NEG = null
+        if (sentenceNEG == null)
+          NEG = getNEG(w, negTable)
+        else
+          NEG = sentenceNEG(p)
         score += Math.log(activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(u/ENCODE)(u%ENCODE)))
         for (z <- NEG)
           score += Math.log(1 - activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(z/ENCODE)(z%ENCODE)))
@@ -127,12 +131,16 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     negSamples
   }
   
-  //skip-gram model, use center word to predict surroung words
+  //skip-gram model, use center word to predict surrounding words
   private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Unit = {
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
         val u = sentence(p)
-        val NEG = sentenceNEG(p)
+        var NEG = null
+        if (sentenceNEG == null)
+          NEG = getNEG(u, negTable)
+        else
+          NEG = sentenceNEG(p)
         val gradientW = new Array[Float](vectorSize)
         val g = (1 - activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(u/ENCODE)(u%ENCODE))).toFloat
         blas.saxpy(vectorSize, g, syn1(u/ENCODE)(u%ENCODE), 1, gradientW, 1)
