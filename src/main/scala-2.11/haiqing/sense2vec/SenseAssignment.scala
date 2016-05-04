@@ -432,10 +432,13 @@ class SenseAssignment extends Serializable {
         }
       val bcSenseCountAdd = sc.broadcast(senseCountAdd)
 
-      var loss = sc.accumulator(0.0)
-      var lossNum = sc.accumulator(0)
+      /*
+      val loss = sc.accumulator(0.0)
+      val lossNum = sc.accumulator(0)
       var adjust = sc.accumulator(0)
+      */
 
+      /*
       println("validationSet.count()="+validationSet.count())
 
       //adjust sense assignment and calculate loss for validation set
@@ -460,14 +463,14 @@ class SenseAssignment extends Serializable {
       val sentenceNumValidation = validationSet.count()
       println("Average number of adjustments per sentence: " + adjust.value*1.0/sentenceNumValidation)
       println("Average loss per word: "+loss.value/lossNum.value)
+      */
 
-      loss = sc.accumulator(0.0)
-      lossNum = sc.accumulator(0)
+      /*
       adjust = sc.accumulator(0)
 
       println("trainSplit(indexRDD).count()="+trainSplit(indexRDD).count())
 
-      //adjust sense assignment and calculate loss for training set
+      //adjust sense assignment for training set
       println("iteration = " + k + "   indexRDD = " + indexRDD+ " adjust sense assignment and calculate loss for training set...")
       trainSplit(indexRDD) = trainSplit(indexRDD).mapPartitionsWithIndex {(idx,iter)=>
         util.Random.setSeed(seed*idx+k)
@@ -484,14 +487,11 @@ class SenseAssignment extends Serializable {
           newIter+=sentence
           adjust += t
           F.addSenseCount()
-          loss += F.sentenceLoss()
-          lossNum += sentence.size
         }
         newIter.toIterator
       }.cache()
       val sentenceNumTraining = trainSplit(indexRDD).count()
       println("Average number of adjustments per sentence: " + adjust.value*1.0/sentenceNumTraining)
-      println("Average loss per word: "+loss.value/lossNum.value)
 
       //update senseCount
       println("iteration = " + k + "   indexRDD = " + indexRDD+ " update senseCount ...")
@@ -500,6 +500,7 @@ class SenseAssignment extends Serializable {
           //maybe a problem
           senseCount(word)(sense) = (senseCount(word)(sense)*(1-ALPHA)+senseCountAdd(word)(sense)*ALPHA).toInt
         }
+*/
 
       /*
       println("print out senseCountAdd and senseCount ...")
@@ -553,17 +554,23 @@ class SenseAssignment extends Serializable {
         if (idx == 0)
           println("alpha="+alpha)
 
+        var loss = 0.0
+        var lossNum = 0
         for (sentence <- iter) {
           if (wordCount - lastWordCount > stepSize) {
             var alpha = learningRate * (1 - (totalWordCount*1.0+wordCount*numPartitions) / totalTrainWords )
             if (alpha < learningRate * 0.0001f) alpha = learningRate * 0.0001f
-            //println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha)
+            println("partition "+ idx+ ",  wordCount = " + (totalWordCount+wordCount*numPartitions) + "/" +totalTrainWords+ ", "+((wordCount-lastWordCount)*1000/(currentTime-startTime))+" words per second"+", alpha = " + alpha+" loss = "+loss/lossNum+" lossSum = "+loss+"lossNum = "+lossNum)
+            loss = 0.0
+            lossNum = 0
             lastWordCount = wordCount
             startTime = currentTime
+
           }
-          F.setSentence(sentence)
-          F.generateSentenceNEG()
-          F.learnSentence(alpha.toFloat)
+          for (pos <- 0 to sentence.size - 1) {
+            val w = sentence(pos)
+            learn(w, pos, alpha, alpha)
+          }
           //about syn0Modify and syn1Modify may be a problem
           wordCount += sentence.size
         }

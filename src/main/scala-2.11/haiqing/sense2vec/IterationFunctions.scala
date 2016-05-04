@@ -94,7 +94,8 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   }
 
   //skip-gram learning from the whole sentence
-  def learnSentence(alpha: Float): Unit = {
+  def learnSentence(alpha: Float): Double = {
+
     for (pos <- 0 to sentence.size - 1) {
       val w = sentence(pos)
       //val word = w / ENCODE
@@ -132,7 +133,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   }
   
   //skip-gram model, use center word to predict surrounding words
-  private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Unit = {
+  private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Double = {
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
         val u = sentence(p)
