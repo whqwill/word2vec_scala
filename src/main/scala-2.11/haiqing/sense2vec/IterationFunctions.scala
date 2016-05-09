@@ -29,9 +29,9 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   }
 
   //generate sentence negative samples
-  //def generateSentenceNEG(): Unit = {
-  //  sentenceNEG = sentence.map(w=>getNEG(w,negTable))
-  //}
+  def generateSentenceNEG(): Unit = {
+    sentenceNEG = sentence.map(w=>getNEG(w,negTable))
+  }
 
   //adjust senses in the sentence
   def adjustSentence(): Boolean = {
@@ -66,15 +66,15 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     loss
   }
 
-  //log probability of using center word to predict surrounding words
+  //log probability of using center word to predict surrouding words
   private def getScore(w: Int, pos: Int): Double = {
     var score = 0.0
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
         val u = sentence(p)
-        var NEG = null
+        var NEG : Array[Int] = null
         if (sentenceNEG == null)
-          NEG = getNEG(w, negTable)
+          NEG = getNEG(u,negTable)
         else
           NEG = sentenceNEG(p)
         score += Math.log(activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(u/ENCODE)(u%ENCODE)))
@@ -94,8 +94,9 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
   }
 
   //skip-gram learning from the whole sentence
-  def learnSentence(alpha: Float): Double = {
-
+  def learnSentence(alpha: Float): (Double,Int) = {
+    var loss = 0.0
+    var lossNum = 0
     for (pos <- 0 to sentence.size - 1) {
       val w = sentence(pos)
       //val word = w / ENCODE
@@ -104,7 +105,9 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
         //if (multiSense == 1)
         //  learn(w, pos, alpha, alpha)
         //else
-      learn(w, pos, alpha, alpha)
+      val tmp = learn(w, pos, alpha, alpha)
+      loss += tmp._1
+      lossNum += tmp._2
         /*
         for (otherSense <- 0 to senseTable(word) - 1)
           if (sense != otherSense && senseCount(word)(sense) > senseCount(word)(otherSense) * U) {
@@ -114,6 +117,7 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
           */
       //}
     }
+    (loss,lossNum)
   }
 
   private def getNEG(w: Int, negTable: Array[Int]): Array[Int] = {
@@ -132,27 +136,36 @@ class IterationFunctions (private val window: Int, private val vectorSize: Int, 
     negSamples
   }
   
-  //skip-gram model, use center word to predict surrounding words
-  private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): Double = {
+  //skip-gram model, use center word to predict surroung words
+  private def learn(w: Int, pos: Int, alphaW: Float, alphaU: Float): (Double,Int) = {
+    var loss = 0.0
+    var lossNum = 0
     for (p <- pos-window+1 to pos+window-1)
       if (p != pos && p >=0 && p < sentence.size) {
         val u = sentence(p)
-        var NEG = null
+        var NEG : Array[Int] = null
         if (sentenceNEG == null)
-          NEG = getNEG(u, negTable)
+          NEG = getNEG(u,negTable)
         else
           NEG = sentenceNEG(p)
         val gradientW = new Array[Float](vectorSize)
-        val g = (1 - activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(u/ENCODE)(u%ENCODE))).toFloat
+        val l = activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(u/ENCODE)(u%ENCODE))
+        val g = (1-l).toFloat
+        loss += -math.log(l)
+        lossNum += 1
         blas.saxpy(vectorSize, g, syn1(u/ENCODE)(u%ENCODE), 1, gradientW, 1)
         blas.saxpy(vectorSize, g*alphaU, syn0(w/ENCODE)(w%ENCODE), 1, syn1(u/ENCODE)(u%ENCODE), 1)
         for (z <- NEG) {
-          val g = (-activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(z/ENCODE)(z%ENCODE))).toFloat
+          val l = activeFunction(syn0(w/ENCODE)(w%ENCODE), syn1(z/ENCODE)(z%ENCODE))
+          val g = (-l).toFloat
+          loss += -math.log(1-l)
+          lossNum += 1
           blas.saxpy(vectorSize, g, syn1(z/ENCODE)(z%ENCODE), 1, gradientW, 1)
           blas.saxpy(vectorSize, g*alphaU, syn0(w/ENCODE)(w%ENCODE), 1, syn1(z/ENCODE)(z%ENCODE), 1)
         }
         blas.saxpy(vectorSize, alphaW, gradientW, 1, syn0(w/ENCODE)(w%ENCODE), 1)
     }
+    (loss,lossNum)
   }
 
   //sigmoid function applying on two vectors

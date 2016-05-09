@@ -14,8 +14,6 @@ import scala.io.Source
  * Created by hwang on 09.02.16.
  */
 
-
-
 class SenseAssignment extends Serializable {
 
   private var vectorSize = 100
@@ -32,7 +30,7 @@ class SenseAssignment extends Serializable {
   private var stepSize = 10000
   private var local = true
   private var testStep = 5
-  private var validationRatio = 0.1
+  private var validationRatio = 0.0
 
   def setVectorSize(vectorSize: Int): this.type = {
     this.vectorSize = vectorSize
@@ -565,12 +563,11 @@ class SenseAssignment extends Serializable {
             lossNum = 0
             lastWordCount = wordCount
             startTime = currentTime
-
           }
-          for (pos <- 0 to sentence.size - 1) {
-            val w = sentence(pos)
-            learn(w, pos, alpha, alpha)
-          }
+          F.setSentence(sentence)
+          val tmp = F.learnSentence(alpha.toFloat)
+          loss += tmp._1
+          lossNum += tmp._2
           //about syn0Modify and syn1Modify may be a problem
           wordCount += sentence.size
         }
@@ -591,7 +588,7 @@ class SenseAssignment extends Serializable {
         //val synIter = mutable.MutableList[(Int,(Array[Float],Int))]()
         synIter.toIterator
       }.cache()
-
+      
       if (local) {
         tmpRDD.count()
       }
